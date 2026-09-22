@@ -884,10 +884,11 @@ NotificationLayout.SortOrder = Enum.SortOrder.LayoutOrder
 NotificationLayout.Padding = UDim.new(0, 7)
 NotificationLayout.Parent = NotificationContainer
 
+local NOTIFICATION_GAP = 36
 local function updateNotificationPosition()
 	local pos = MainFrame.AbsolutePosition
 	local size = MainFrame.AbsoluteSize
-	NotificationContainer.Position = UDim2.fromOffset(pos.X + (size.X / 2), pos.Y + size.Y + 16)
+	NotificationContainer.Position = UDim2.fromOffset(pos.X + (size.X / 2), pos.Y + size.Y + NOTIFICATION_GAP)
 end
 
 MainFrame:GetPropertyChangedSignal("Position"):Connect(updateNotificationPosition)
@@ -1367,6 +1368,11 @@ local function createButton(text, parent, _pastelColor)
 	status.ZIndex = btn.ZIndex + 1
 	status.Parent = btn
 
+	local statusScale = Instance.new("UIScale")
+	statusScale.Name = "StatusPillScale"
+	statusScale.Scale = 1
+	statusScale.Parent = status
+
 	local statusCorner = Instance.new("UICorner")
 	statusCorner.CornerRadius = UDim.new(1, 0)
 	statusCorner.Parent = status
@@ -1398,7 +1404,7 @@ local function createButton(text, parent, _pastelColor)
 		local currentStatus = isOn and "ON" or (isOff and "OFF" or nil)
 		if currentStatus and lastStatus and currentStatus ~= lastStatus then
 			playUISound(ToggleSFX)
-			hapticPulse(btn, buttonScale, 0.75)
+			hapticPulse(status, statusScale, 1.0)
 		end
 		lastStatus = currentStatus
 
@@ -1872,28 +1878,7 @@ WarningStatusLabel.TextSize = 9
 WarningStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
 WarningStatusLabel.Parent = WarningPage
 
-local WarningSearchBox = Instance.new("TextBox")
-WarningSearchBox.Size = UDim2.new(1, 0, 0, 32)
-WarningSearchBox.BackgroundColor3 = Theme.Surface
-WarningSearchBox.BackgroundTransparency = 0.34
-WarningSearchBox.PlaceholderText = "Search watched players..."
-WarningSearchBox.PlaceholderColor3 = Theme.TextSecondary
-WarningSearchBox.Text = ""
-WarningSearchBox.TextColor3 = Theme.Text
-WarningSearchBox.Font = Enum.Font.Gotham
-WarningSearchBox.TextSize = 10
-WarningSearchBox.ClearTextOnFocus = false
-WarningSearchBox.Parent = WarningPage
-Instance.new("UICorner", WarningSearchBox).CornerRadius = UDim.new(0, 10)
-local warningSearchPadding = Instance.new("UIPadding")
-warningSearchPadding.PaddingLeft = UDim.new(0, 12)
-warningSearchPadding.PaddingRight = UDim.new(0, 12)
-warningSearchPadding.Parent = WarningSearchBox
-local warningSearchStroke = Instance.new("UIStroke")
-warningSearchStroke.Color = Theme.White
-warningSearchStroke.Transparency = 0.62
-warningSearchStroke.Thickness = 1
-warningSearchStroke.Parent = WarningSearchBox
+local CheckServerWarningsBtn = createButton("Check Watched Players In Server", WarningPage, Theme.Surface)
 
 local WarningListFrame = Instance.new("ScrollingFrame")
 WarningListFrame.Size = UDim2.new(1, 0, 0, 170)
@@ -1915,12 +1900,8 @@ local function refreshWarningList()
 	for _, child in ipairs(WarningListFrame:GetChildren()) do
 		if child:IsA("Frame") then child:Destroy() end
 	end
-	local query = string.lower(WarningSearchBox.Text or "")
-	local visibleCount = 0
 	for index, username in ipairs(HubState.PlayerWarnings) do
-		if query == "" or string.find(string.lower(username), query, 1, true) then
-			visibleCount += 1
-			local row = Instance.new("Frame")
+		local row = Instance.new("Frame")
 			row.Name = "WarningRow"
 			row.Size = UDim2.new(1, -4, 0, 30)
 			row.BackgroundColor3 = Theme.Surface
@@ -1932,7 +1913,14 @@ local function refreshWarningList()
 			local dot = Instance.new("Frame")
 			dot.Size = UDim2.fromOffset(7,7)
 			dot.Position = UDim2.new(0,9,0.5,-3.5)
-			dot.BackgroundColor3 = Color3.fromRGB(90,220,135)
+			local currentlyInServer = false
+			for _, onlinePlayer in ipairs(Players:GetPlayers()) do
+				if string.lower(onlinePlayer.Name) == string.lower(username) then
+					currentlyInServer = true
+					break
+				end
+			end
+			dot.BackgroundColor3 = currentlyInServer and Color3.fromRGB(90,220,135) or Theme.TextSecondary
 			dot.BorderSizePixel = 0
 			dot.Parent = row
 			Instance.new("UICorner", dot).CornerRadius = UDim.new(1,0)
@@ -1963,10 +1951,41 @@ local function refreshWarningList()
 					refreshWarningList()
 				end
 			end)
+	end
+	WarningStatusLabel.Text = "Saved warnings: " .. tostring(#HubState.PlayerWarnings) .. "  •  " .. WarningPersistenceMode
+end
+
+local function checkWatchedPlayersInServer()
+	local found = {}
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player ~= LocalPlayer then
+			for _, watchedName in ipairs(HubState.PlayerWarnings) do
+				if string.lower(watchedName) == string.lower(player.Name) then
+					table.insert(found, player.Name)
+					break
+				end
+			end
 		end
 	end
-	WarningStatusLabel.Text = "Saved warnings: " .. tostring(#HubState.PlayerWarnings) .. "  •  " .. WarningPersistenceMode .. (query ~= "" and ("  •  " .. tostring(visibleCount) .. " shown") or "")
+
+	if #found == 0 then
+		showNotification("Player Warning", "None of your watched players are currently in this server.", 3.5)
+		WarningStatusLabel.Text = "Saved warnings: " .. tostring(#HubState.PlayerWarnings) .. "  •  " .. WarningPersistenceMode .. "  •  None found in server"
+	else
+		local shown = table.concat(found, ", ")
+		showNotification("⚠ Watched Player Found", "In this server: " .. shown, 6)
+		WarningStatusLabel.Text = "Saved warnings: " .. tostring(#HubState.PlayerWarnings) .. "  •  " .. WarningPersistenceMode .. "  •  Found: " .. shown
+	end
 end
+
+CheckServerWarningsBtn.MouseButton1Click:Connect(checkWatchedPlayersInServer)
+Players.PlayerAdded:Connect(function()
+	task.defer(refreshWarningList)
+end)
+Players.PlayerRemoving:Connect(function()
+	task.defer(refreshWarningList)
+end)
+
 local function addPlayerWarning(username)
 	username = tostring(username or ""):gsub("^%s+", ""):gsub("%s+$", "")
 	if username == "" then
@@ -3165,4 +3184,4 @@ RunService.Stepped:Connect(function()
 	end
 end)
 
-print("💎 Gemini Hub V14.3 Active: Liquid Glass UI • Optimized NPC ESP • Player Warnings • Notifications ❄️💎")
+print("💎 Gemini Hub V14.4 Active: Liquid Glass UI • Optimized NPC ESP • Player Warnings • Notifications ❄️💎")
