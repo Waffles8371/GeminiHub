@@ -615,7 +615,7 @@ local Version = Instance.new("TextLabel")
 Version.Size = UDim2.new(1, -80, 0, 16)
 Version.Position = UDim2.new(0, 20, 0, 31)
 Version.BackgroundTransparency = 1
-Version.Text = "v14"
+Version.Text = "v14.1"
 Version.TextColor3 = Theme.TextSecondary
 Version.Font = Enum.Font.Gotham
 Version.TextSize = 10
@@ -646,6 +646,37 @@ MinStroke.Thickness = 1
 MinStroke.Parent = MinMaxBtn
 
 local minimized = false
+
+local MinMaxScale = Instance.new("UIScale")
+MinMaxScale.Scale = 1
+MinMaxScale.Parent = MinMaxBtn
+
+local function pressMinMaxButton()
+	TweenService:Create(MinMaxScale, TweenFast, {Scale = 0.97}):Play()
+	TweenService:Create(MinMaxBtn, TweenFast, {
+		BackgroundTransparency = 0,
+		BackgroundColor3 = Theme.White,
+		TextColor3 = Theme.Accent,
+	}):Play()
+end
+
+local function releaseMinMaxButton()
+	TweenService:Create(MinMaxScale, TweenFast, {Scale = 1}):Play()
+	TweenService:Create(MinMaxBtn, TweenFast, {
+		BackgroundTransparency = 0.55,
+		BackgroundColor3 = Theme.White,
+		TextColor3 = Theme.Text,
+	}):Play()
+end
+
+MinMaxBtn.MouseButton1Down:Connect(pressMinMaxButton)
+MinMaxBtn.MouseButton1Up:Connect(releaseMinMaxButton)
+MinMaxBtn.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.Touch then pressMinMaxButton() end
+end)
+MinMaxBtn.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.Touch then releaseMinMaxButton() end
+end)
 
 MinMaxBtn.MouseButton1Click:Connect(function()
 	local currentSize = MainFrame.AbsoluteSize
@@ -936,21 +967,21 @@ local ActiveTabName = "ESP"
 -- UIListLayout never tries to lay the indicator out as another tab.
 local TabIndicatorLayer = Instance.new("Frame")
 TabIndicatorLayer.Name = "TabIndicatorLayer"
-TabIndicatorLayer.Size = TabBar.Size
-TabIndicatorLayer.Position = TabBar.Position
+TabIndicatorLayer.Size = UDim2.new(1, 0, 1, 0)
+TabIndicatorLayer.Position = UDim2.new(0, 0, 0, 0)
 TabIndicatorLayer.BackgroundTransparency = 1
 TabIndicatorLayer.BorderSizePixel = 0
-TabIndicatorLayer.ZIndex = 4
+TabIndicatorLayer.ZIndex = 6
 TabIndicatorLayer.Parent = MainFrame
 
 local TabIndicator = Instance.new("Frame")
 TabIndicator.Name = "ActiveTabPill"
-TabIndicator.Size = UDim2.new(1/6, -4, 0, 32)
-TabIndicator.Position = UDim2.new(0, 5, 0, 4)
+TabIndicator.Size = UDim2.fromOffset(0, 0)
+TabIndicator.Position = UDim2.fromOffset(0, 0)
 TabIndicator.BackgroundColor3 = Theme.White
 TabIndicator.BackgroundTransparency = 0.48
 TabIndicator.BorderSizePixel = 0
-TabIndicator.ZIndex = 4
+TabIndicator.ZIndex = 6
 TabIndicator.Parent = TabIndicatorLayer
 
 local TabIndicatorCorner = Instance.new("UICorner")
@@ -979,9 +1010,19 @@ TabIndicatorGradient.Parent = TabIndicator
 
 local function moveTabIndicator(btn, instant)
 	task.defer(function()
-		if not btn or not btn.Parent then return end
-		local targetSize = btn.Size
-		local targetPosition = btn.Position
+		if not btn or not btn.Parent or not MainFrame.Parent then return end
+		-- The tabs are laid out by UIPadding + UIListLayout, so their actual
+		-- pixel positions are more reliable than reconstructing the math from
+		-- UDim2. Convert the pressed tab's absolute rectangle into MainFrame
+		-- coordinates so the glass pill lands exactly over that tab.
+		local mainPos = MainFrame.AbsolutePosition
+		local btnPos = btn.AbsolutePosition
+		local targetSize = UDim2.fromOffset(btn.AbsoluteSize.X, btn.AbsoluteSize.Y)
+		local targetPosition = UDim2.fromOffset(
+			btnPos.X - mainPos.X,
+			btnPos.Y - mainPos.Y
+		)
+
 		if instant then
 			TabIndicator.Size = targetSize
 			TabIndicator.Position = targetPosition
@@ -1022,6 +1063,12 @@ local function setTabVisual(btn, active, instant)
 	end
 end
 
+MainFrame:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+	if ActiveTabName and Containers[ActiveTabName] then
+		moveTabIndicator(Containers[ActiveTabName].Button, true)
+	end
+end)
+
 local function activateTab(name)
 	ActiveTabName = name
 
@@ -1044,7 +1091,7 @@ local function createTab(name, _pastelBaseColor)
 	btn.TextColor3 = Theme.TextSecondary
 	btn.Font = Enum.Font.GothamMedium
 	btn.TextSize = 10
-	btn.ZIndex = 6
+	btn.ZIndex = 7
 	btn.Parent = TabBar
 
 	local corner = Instance.new("UICorner")
@@ -1120,20 +1167,23 @@ local function createTab(name, _pastelBaseColor)
 	end)
 
 	btn.MouseButton1Down:Connect(function()
-		TweenService:Create(btn, TweenFast, {
-			BackgroundTransparency = 0.58,
-			TextColor3 = Theme.Accent,
-		}):Play()
 		TweenService:Create(TabIndicator, TweenFast, {BackgroundTransparency = 0.32}):Play()
 	end)
 
 	btn.MouseButton1Up:Connect(function()
-		if ActiveTabName == name then
-			TweenService:Create(btn, TweenFast, {BackgroundTransparency = 1}):Play()
-		else
-			TweenService:Create(btn, TweenFast, {BackgroundTransparency = 0.88}):Play()
-		end
 		TweenService:Create(TabIndicator, TweenFast, {BackgroundTransparency = 0.48}):Play()
+	end)
+
+	btn.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.Touch then
+			TweenService:Create(TabIndicator, TweenFast, {BackgroundTransparency = 0.32}):Play()
+		end
+	end)
+
+	btn.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.Touch then
+			TweenService:Create(TabIndicator, TweenFast, {BackgroundTransparency = 0.48}):Play()
+		end
 	end)
 
 	return page
@@ -1248,8 +1298,11 @@ local function createButton(text, parent, _pastelColor)
 
 	local function updateStatusVisual()
 		local upper = string.upper(btn.Text)
-		local isOn = string.find(upper, "ON", 1, true) ~= nil
-		local isOff = string.find(upper, "OFF", 1, true) ~= nil
+		-- Only treat an explicit trailing ON/OFF state as a toggle.
+		-- This prevents words such as "MODIFICATIONS" from accidentally
+		-- creating a toggle capsule.
+		local isOn = string.match(upper, "ON%s*$") ~= nil
+		local isOff = string.match(upper, "OFF%s*$") ~= nil
 
 		status.Visible = isOn or isOff
 
@@ -1303,6 +1356,9 @@ local function createButton(text, parent, _pastelColor)
 	end)
 
 	local function pressButton()
+		-- Toggle rows already have a moving status capsule, so avoid adding
+		-- the old size-compression animation on top of that UI.
+		if status.Visible then return end
 		TweenService:Create(btn, TweenFast, {
 			BackgroundTransparency = 0.08,
 			BackgroundColor3 = Theme.SurfacePressed,
@@ -1311,6 +1367,7 @@ local function createButton(text, parent, _pastelColor)
 	end
 
 	local function releaseButton()
+		if status.Visible then return end
 		TweenService:Create(btn, TweenFast, {
 			BackgroundTransparency = 0.18,
 			BackgroundColor3 = Theme.SurfaceHover,
@@ -1677,6 +1734,163 @@ local SettingsPage = createTab("Config", Theme.AccentSoft)
 
 Containers["ESP"].Page.Visible = true
 setTabVisual(Containers["ESP"].Button, true, true)
+
+-- ==========================================
+-- ⚠️ PLAYER WARNING UI & JOIN DETECTION
+-- ==========================================
+createSectionHeader("Watched Players", WarningPage)
+
+local WarningNameBox = Instance.new("TextBox")
+WarningNameBox.Size = UDim2.new(1, 0, 0, 36)
+WarningNameBox.BackgroundColor3 = Theme.Surface
+WarningNameBox.BackgroundTransparency = 0.28
+WarningNameBox.PlaceholderText = "Enter Roblox username..."
+WarningNameBox.PlaceholderColor3 = Theme.TextSecondary
+WarningNameBox.Text = ""
+WarningNameBox.TextColor3 = Theme.Text
+WarningNameBox.Font = Enum.Font.Gotham
+WarningNameBox.TextSize = 11
+WarningNameBox.ClearTextOnFocus = false
+WarningNameBox.Parent = WarningPage
+Instance.new("UICorner", WarningNameBox).CornerRadius = UDim.new(0, 10)
+local warningBoxPadding = Instance.new("UIPadding")
+warningBoxPadding.PaddingLeft = UDim.new(0, 12)
+warningBoxPadding.PaddingRight = UDim.new(0, 12)
+warningBoxPadding.Parent = WarningNameBox
+local warningBoxStroke = Instance.new("UIStroke")
+warningBoxStroke.Color = Theme.White
+warningBoxStroke.Transparency = 0.50
+warningBoxStroke.Thickness = 1
+warningBoxStroke.Parent = WarningNameBox
+
+local AddWarningBtn = createButton("Add Player Warning", WarningPage, Theme.Surface)
+local WarningStatusLabel = Instance.new("TextLabel")
+WarningStatusLabel.Size = UDim2.new(1, 0, 0, 18)
+WarningStatusLabel.BackgroundTransparency = 1
+WarningStatusLabel.Text = "Saved warnings: 0  •  " .. WarningPersistenceMode
+WarningStatusLabel.TextColor3 = Theme.TextSecondary
+WarningStatusLabel.Font = Enum.Font.Gotham
+WarningStatusLabel.TextSize = 9
+WarningStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+WarningStatusLabel.Parent = WarningPage
+
+local WarningListFrame = Instance.new("ScrollingFrame")
+WarningListFrame.Size = UDim2.new(1, 0, 0, 170)
+WarningListFrame.BackgroundTransparency = 1
+WarningListFrame.BorderSizePixel = 0
+WarningListFrame.ScrollBarThickness = 2
+WarningListFrame.ScrollBarImageColor3 = Theme.Accent
+WarningListFrame.ScrollBarImageTransparency = 0.55
+WarningListFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+WarningListFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+WarningListFrame.Parent = WarningPage
+
+local WarningListLayout = Instance.new("UIListLayout")
+WarningListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+WarningListLayout.Padding = UDim.new(0, 5)
+WarningListLayout.Parent = WarningListFrame
+
+local function refreshWarningList()
+	for _, child in ipairs(WarningListFrame:GetChildren()) do
+		if child:IsA("Frame") then child:Destroy() end
+	end
+
+	for index, username in ipairs(HubState.PlayerWarnings) do
+		local row = Instance.new("Frame")
+		row.Size = UDim2.new(1, 0, 0, 34)
+		row.BackgroundColor3 = Theme.Surface
+		row.BackgroundTransparency = 0.38
+		row.BorderSizePixel = 0
+		row.Parent = WarningListFrame
+		Instance.new("UICorner", row).CornerRadius = UDim.new(0, 9)
+
+		local dot = Instance.new("Frame")
+		dot.Size = UDim2.new(0, 7, 0, 7)
+		dot.Position = UDim2.new(0, 10, 0.5, -3.5)
+		dot.BackgroundColor3 = Color3.fromRGB(70, 205, 115)
+		dot.BorderSizePixel = 0
+		dot.Parent = row
+		Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
+
+		local nameLabel = Instance.new("TextLabel")
+		nameLabel.Size = UDim2.new(1, -58, 1, 0)
+		nameLabel.Position = UDim2.new(0, 25, 0, 0)
+		nameLabel.BackgroundTransparency = 1
+		nameLabel.Text = username
+		nameLabel.TextColor3 = Theme.Text
+		nameLabel.Font = Enum.Font.GothamMedium
+		nameLabel.TextSize = 10.5
+		nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+		nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
+		nameLabel.Parent = row
+
+		local removeBtn = Instance.new("TextButton")
+		removeBtn.Size = UDim2.new(0, 28, 0, 24)
+		removeBtn.Position = UDim2.new(1, -34, 0.5, -12)
+		removeBtn.BackgroundColor3 = Theme.SurfacePressed
+		removeBtn.BackgroundTransparency = 0.12
+		removeBtn.BorderSizePixel = 0
+		removeBtn.Text = "×"
+		removeBtn.TextColor3 = Theme.Text
+		removeBtn.Font = Enum.Font.GothamBold
+		removeBtn.TextSize = 13
+		removeBtn.AutoButtonColor = false
+		removeBtn.Parent = row
+		Instance.new("UICorner", removeBtn).CornerRadius = UDim.new(0, 7)
+
+		removeBtn.MouseButton1Click:Connect(function()
+			table.remove(HubState.PlayerWarnings, index)
+			savePlayerWarnings()
+			refreshWarningList()
+		end)
+	end
+
+	WarningStatusLabel.Text = "Saved warnings: " .. tostring(#HubState.PlayerWarnings) .. "  •  " .. WarningPersistenceMode
+end
+
+local function addPlayerWarning(username)
+	username = tostring(username or ""):gsub("^%s+", ""):gsub("%s+$", "")
+	if username == "" then
+		showNotification("Player Warning", "Enter a username first.", 2.5)
+		return
+	end
+
+	for _, existing in ipairs(HubState.PlayerWarnings) do
+		if string.lower(existing) == string.lower(username) then
+			showNotification("Player Warning", username .. " is already being watched.", 2.5)
+			return
+		end
+	end
+
+	table.insert(HubState.PlayerWarnings, username)
+	savePlayerWarnings()
+	refreshWarningList()
+	WarningNameBox.Text = ""
+	showNotification("Player Warning", "Now watching " .. username .. ".", 2.5)
+end
+
+AddWarningBtn.MouseButton1Click:Connect(function()
+	addPlayerWarning(WarningNameBox.Text)
+end)
+
+WarningNameBox.FocusLost:Connect(function(enterPressed)
+	if enterPressed then
+		addPlayerWarning(WarningNameBox.Text)
+	end
+end)
+
+local function checkPlayerWarning(player)
+	if not player or player == LocalPlayer then return end
+	for _, watchedName in ipairs(HubState.PlayerWarnings) do
+		if string.lower(watchedName) == string.lower(player.Name) then
+			showNotification("⚠ Player Warning", player.Name .. " joined the server.", 6)
+			return
+		end
+	end
+end
+
+Players.PlayerAdded:Connect(checkPlayerWarning)
+refreshWarningList()
 
 -- ==========================================
 -- 💊 HEALTH BAR ENGINE
@@ -2298,6 +2512,8 @@ CapBox.TextSize = 12
 Instance.new("UICorner", CapBox).CornerRadius = UDim.new(0, 8)
 
 local ApplySpeedBtn = createButton("Apply Speed Modifications", SpeedPage, Color3.fromRGB(210, 235, 255))
+local ApplySpeedStatus = ApplySpeedBtn:FindFirstChild("StatusPill")
+if ApplySpeedStatus then ApplySpeedStatus.Visible = false end
 
 local function applySpeedPhysics()
 	local char = LocalPlayer.Character
@@ -2742,4 +2958,4 @@ RunService.Stepped:Connect(function()
 	end
 end)
 
-print("💎 Gemini Hub V14 Active: Liquid Glass UI • Optimized NPC ESP • Player Warnings • Notifications ❄️💎")
+print("💎 Gemini Hub V14.1 Active: Liquid Glass UI • Optimized NPC ESP • Player Warnings • Notifications ❄️💎")
