@@ -1,4 +1,4 @@
--- 💎 GEMINI HUB V14.2 - LIQUID GLASS + UI AUDIO POLISH 💎
+-- 💎 GEMINI HUB V14.3 - LIQUID GLASS + UI AUDIO + CONTROL POLISH 💎
 -- Root Cause Fixed: Restored full-spectrum rainbow pickers & shifted theme balance toward aquatic blue with green sliders! 💧🌈🌿
 
 local Players = game:GetService("Players")
@@ -90,6 +90,9 @@ local HubState = {
 	FOVToggled = false,
 	HoverToggled = false,
 	PlayerWarnings = {},
+
+	-- UI Controls
+	UISoundsEnabled = true,
 }
 
 -- ==========================================
@@ -429,16 +432,17 @@ end
 
 -- Suggested defaults for short UI feedback. IDs/volumes are centralized so
 -- they can be swapped later without touching the button logic.
-local ButtonSFX = makeUISound("Button", 113397864512278, 0.12)
-local ToggleSFX = makeUISound("Toggle", 119541807359284, 0.16)
+local ButtonSFX = makeUISound("Button", 10066931761, 0.12)
+local ToggleSFX = makeUISound("Toggle", 1006693176, 0.16)
 
 local NotificationSFX1 = makeUISound("Notification_1", 115916891254154, 0.5)
-local NotificationSFX2 = makeUISound("Notification_2", 12221944, 0.2)
+local NotificationSFX2 = makeUISound("Notification_2", 15675085146, 0.2)
 
 local ResetSFX1 = makeUISound("Reset_1", 12222140, 0.5)
 local ResetSFX2 = makeUISound("Reset_2", 12222005, 0.5)
 
 local function playUISound(sound)
+	if not HubState.UISoundsEnabled then return end
 	if not sound then return end
 	pcall(function()
 		sound.TimePosition = 0
@@ -449,6 +453,29 @@ end
 local function playUISoundPair(a, b)
 	playUISound(a)
 	playUISound(b)
+end
+
+-- Subtle visual "haptic" feedback for touch/click interactions.
+local function hapticPulse(guiObject, scaleObject, strength)
+	if not guiObject or not guiObject.Parent then return end
+	strength = strength or 1.0
+	local targetScale = 1 + (0.018 * strength)
+	if scaleObject then
+		TweenService:Create(scaleObject, TweenInfo.new(0.07, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Scale = targetScale}):Play()
+		task.delay(0.07, function()
+			if scaleObject and scaleObject.Parent then
+				TweenService:Create(scaleObject, TweenInfo.new(0.13, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {Scale = 1}):Play()
+			end
+		end)
+	else
+		local original = guiObject.BackgroundTransparency
+		TweenService:Create(guiObject, TweenInfo.new(0.07, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {BackgroundTransparency = math.max(0, original - 0.08)}):Play()
+		task.delay(0.07, function()
+			if guiObject and guiObject.Parent then
+				TweenService:Create(guiObject, TweenInfo.new(0.13, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {BackgroundTransparency = original}):Play()
+			end
+		end)
+	end
 end
 
 
@@ -1227,6 +1254,7 @@ local function createTab(name, _pastelBaseColor)
 
 	btn.MouseButton1Down:Connect(function()
 		TweenService:Create(TabIndicator, TweenFast, {BackgroundTransparency = 0.32}):Play()
+		hapticPulse(TabIndicator, TabIndicatorScale, 0.7)
 	end)
 
 	btn.MouseButton1Up:Connect(function()
@@ -1236,6 +1264,7 @@ local function createTab(name, _pastelBaseColor)
 	btn.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.Touch then
 			TweenService:Create(TabIndicator, TweenFast, {BackgroundTransparency = 0.32}):Play()
+			hapticPulse(TabIndicator, TabIndicatorScale, 0.7)
 		end
 	end)
 
@@ -1369,6 +1398,7 @@ local function createButton(text, parent, _pastelColor)
 		local currentStatus = isOn and "ON" or (isOff and "OFF" or nil)
 		if currentStatus and lastStatus and currentStatus ~= lastStatus then
 			playUISound(ToggleSFX)
+			hapticPulse(btn, buttonScale, 0.75)
 		end
 		lastStatus = currentStatus
 
@@ -1426,6 +1456,7 @@ local function createButton(text, parent, _pastelColor)
 		-- the old size-compression animation on top of that UI.
 		if status.Visible then return end
 		playUISound(ButtonSFX)
+		hapticPulse(btn, buttonScale, 1.0)
 		TweenService:Create(btn, TweenFast, {
 			BackgroundTransparency = 0.08,
 			BackgroundColor3 = Theme.SurfacePressed,
@@ -1841,6 +1872,29 @@ WarningStatusLabel.TextSize = 9
 WarningStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
 WarningStatusLabel.Parent = WarningPage
 
+local WarningSearchBox = Instance.new("TextBox")
+WarningSearchBox.Size = UDim2.new(1, 0, 0, 32)
+WarningSearchBox.BackgroundColor3 = Theme.Surface
+WarningSearchBox.BackgroundTransparency = 0.34
+WarningSearchBox.PlaceholderText = "Search watched players..."
+WarningSearchBox.PlaceholderColor3 = Theme.TextSecondary
+WarningSearchBox.Text = ""
+WarningSearchBox.TextColor3 = Theme.Text
+WarningSearchBox.Font = Enum.Font.Gotham
+WarningSearchBox.TextSize = 10
+WarningSearchBox.ClearTextOnFocus = false
+WarningSearchBox.Parent = WarningPage
+Instance.new("UICorner", WarningSearchBox).CornerRadius = UDim.new(0, 10)
+local warningSearchPadding = Instance.new("UIPadding")
+warningSearchPadding.PaddingLeft = UDim.new(0, 12)
+warningSearchPadding.PaddingRight = UDim.new(0, 12)
+warningSearchPadding.Parent = WarningSearchBox
+local warningSearchStroke = Instance.new("UIStroke")
+warningSearchStroke.Color = Theme.White
+warningSearchStroke.Transparency = 0.62
+warningSearchStroke.Thickness = 1
+warningSearchStroke.Parent = WarningSearchBox
+
 local WarningListFrame = Instance.new("ScrollingFrame")
 WarningListFrame.Size = UDim2.new(1, 0, 0, 170)
 WarningListFrame.BackgroundTransparency = 1
@@ -1861,60 +1915,58 @@ local function refreshWarningList()
 	for _, child in ipairs(WarningListFrame:GetChildren()) do
 		if child:IsA("Frame") then child:Destroy() end
 	end
-
+	local query = string.lower(WarningSearchBox.Text or "")
+	local visibleCount = 0
 	for index, username in ipairs(HubState.PlayerWarnings) do
-		local row = Instance.new("Frame")
-		row.Size = UDim2.new(1, 0, 0, 34)
-		row.BackgroundColor3 = Theme.Surface
-		row.BackgroundTransparency = 0.38
-		row.BorderSizePixel = 0
-		row.Parent = WarningListFrame
-		Instance.new("UICorner", row).CornerRadius = UDim.new(0, 9)
-
-		local dot = Instance.new("Frame")
-		dot.Size = UDim2.new(0, 7, 0, 7)
-		dot.Position = UDim2.new(0, 10, 0.5, -3.5)
-		dot.BackgroundColor3 = Color3.fromRGB(70, 205, 115)
-		dot.BorderSizePixel = 0
-		dot.Parent = row
-		Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
-
-		local nameLabel = Instance.new("TextLabel")
-		nameLabel.Size = UDim2.new(1, -58, 1, 0)
-		nameLabel.Position = UDim2.new(0, 25, 0, 0)
-		nameLabel.BackgroundTransparency = 1
-		nameLabel.Text = username
-		nameLabel.TextColor3 = Theme.Text
-		nameLabel.Font = Enum.Font.GothamMedium
-		nameLabel.TextSize = 10.5
-		nameLabel.TextXAlignment = Enum.TextXAlignment.Left
-		nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
-		nameLabel.Parent = row
-
-		local removeBtn = Instance.new("TextButton")
-		removeBtn.Size = UDim2.new(0, 28, 0, 24)
-		removeBtn.Position = UDim2.new(1, -34, 0.5, -12)
-		removeBtn.BackgroundColor3 = Theme.SurfacePressed
-		removeBtn.BackgroundTransparency = 0.12
-		removeBtn.BorderSizePixel = 0
-		removeBtn.Text = "×"
-		removeBtn.TextColor3 = Theme.Text
-		removeBtn.Font = Enum.Font.GothamBold
-		removeBtn.TextSize = 13
-		removeBtn.AutoButtonColor = false
-		removeBtn.Parent = row
-		Instance.new("UICorner", removeBtn).CornerRadius = UDim.new(0, 7)
-
-		removeBtn.MouseButton1Click:Connect(function()
-			table.remove(HubState.PlayerWarnings, index)
-			savePlayerWarnings()
-			refreshWarningList()
-		end)
+		if query == "" or string.find(string.lower(username), query, 1, true) then
+			visibleCount += 1
+			local row = Instance.new("Frame")
+			row.Name = "WarningRow"
+			row.Size = UDim2.new(1, -4, 0, 30)
+			row.BackgroundColor3 = Theme.Surface
+			row.BackgroundTransparency = 0.38
+			row.BorderSizePixel = 0
+			row.LayoutOrder = index
+			row.Parent = WarningListFrame
+			Instance.new("UICorner", row).CornerRadius = UDim.new(0, 9)
+			local dot = Instance.new("Frame")
+			dot.Size = UDim2.fromOffset(7,7)
+			dot.Position = UDim2.new(0,9,0.5,-3.5)
+			dot.BackgroundColor3 = Color3.fromRGB(90,220,135)
+			dot.BorderSizePixel = 0
+			dot.Parent = row
+			Instance.new("UICorner", dot).CornerRadius = UDim.new(1,0)
+			local label = Instance.new("TextLabel")
+			label.Size = UDim2.new(1,-52,1,0)
+			label.Position = UDim2.new(0,23,0,0)
+			label.BackgroundTransparency = 1
+			label.Text = username
+			label.TextColor3 = Theme.Text
+			label.Font = Enum.Font.GothamMedium
+			label.TextSize = 10
+			label.TextXAlignment = Enum.TextXAlignment.Left
+			label.Parent = row
+			local remove = Instance.new("TextButton")
+			remove.Size = UDim2.fromOffset(28,24)
+			remove.Position = UDim2.new(1,-32,0.5,-12)
+			remove.BackgroundTransparency = 1
+			remove.Text = "×"
+			remove.TextColor3 = Theme.TextSecondary
+			remove.Font = Enum.Font.GothamBold
+			remove.TextSize = 16
+			remove.Parent = row
+			remove.MouseButton1Click:Connect(function()
+				local currentIndex = table.find(HubState.PlayerWarnings, username)
+				if currentIndex then
+					table.remove(HubState.PlayerWarnings, currentIndex)
+					savePlayerWarnings()
+					refreshWarningList()
+				end
+			end)
+		end
 	end
-
-	WarningStatusLabel.Text = "Saved warnings: " .. tostring(#HubState.PlayerWarnings) .. "  •  " .. WarningPersistenceMode
+	WarningStatusLabel.Text = "Saved warnings: " .. tostring(#HubState.PlayerWarnings) .. "  •  " .. WarningPersistenceMode .. (query ~= "" and ("  •  " .. tostring(visibleCount) .. " shown") or "")
 end
-
 local function addPlayerWarning(username)
 	username = tostring(username or ""):gsub("^%s+", ""):gsub("%s+$", "")
 	if username == "" then
@@ -2271,6 +2323,56 @@ PlayerToggleBtn.MouseButton1Click:Connect(function()
 	PlayerToggleBtn.Text = "Toggle Player ESP: " .. (HubState.PlayerToggled and "ON" or "OFF")
 	for _, plr in pairs(Players:GetPlayers()) do updateSinglePlayer(plr) end
 end)
+
+-- ==========================================
+-- 🧹 ESP CLEANUP MANAGER
+-- ==========================================
+createSectionHeader("ESP Cleanup", ESPPage)
+local ESPCleanupStatus = Instance.new("TextLabel")
+ESPCleanupStatus.Size = UDim2.new(1, 0, 0, 18)
+ESPCleanupStatus.BackgroundTransparency = 1
+ESPCleanupStatus.Text = "Scans for stale Gemini ESP instances only."
+ESPCleanupStatus.TextColor3 = Theme.TextSecondary
+ESPCleanupStatus.Font = Enum.Font.Gotham
+ESPCleanupStatus.TextSize = 9
+ESPCleanupStatus.TextXAlignment = Enum.TextXAlignment.Left
+ESPCleanupStatus.Parent = ESPPage
+
+local function cleanupESPInstances()
+	local removed = 0
+	for _, v in ipairs(Workspace:GetDescendants()) do
+		local stale = false
+		if v:IsA("Highlight") and v.Name == "NPC_HIGHLIGHT" then
+			local model = v.Parent
+			stale = (not HubState.NPCToggled) or (not model) or (NPCHighlights[model] ~= v) or (not model:IsDescendantOf(Workspace))
+		elseif v:IsA("Highlight") and v.Name == "PLAYER_HIGHLIGHT" then
+			local owner = v.Parent and Players:GetPlayerFromCharacter(v.Parent)
+			stale = (not HubState.PlayerToggled) or (not owner) or owner == LocalPlayer or owner.Character ~= v.Parent
+		elseif v:IsA("Highlight") and v.Name == "Gemini_Hover_HL" then
+			stale = not HubState.HoverToggled
+		elseif v:IsA("SelectionBox") and v.Name == "Gemini_Hover_Outline" then
+			stale = (not HubState.HoverToggled) or (not v.Adornee) or (not v.Adornee:IsDescendantOf(Workspace))
+		elseif v:IsA("BillboardGui") and string.find(v.Name, "NPC_HEALTH_BAR") then
+			local model = v.Adornee and v.Adornee:FindFirstAncestorOfClass("Model")
+			stale = (not HubState.NPCToggled) or (not model) or (NPCHealthBars[model] ~= v)
+		elseif v:IsA("BillboardGui") and string.find(v.Name, "PLAYER_HEALTH_BAR") then
+			local model = v.Adornee and v.Adornee:FindFirstAncestorOfClass("Model")
+			local owner = model and Players:GetPlayerFromCharacter(model)
+			stale = (not HubState.PlayerToggled) or (not owner) or owner == LocalPlayer or owner.Character ~= model
+		elseif v:IsA("BillboardGui") and v.Name == "Gemini_Hover_Name" then
+			stale = not HubState.HoverToggled
+		end
+		if stale then
+			v:Destroy()
+			removed += 1
+		end
+	end
+	ESPCleanupStatus.Text = "Cleaned " .. tostring(removed) .. " stale ESP instance" .. (removed == 1 and "" or "s") .. "."
+	return removed
+end
+
+local ESPCleanupBtn = createButton("Clean Stale ESP Instances", ESPPage, Theme.Surface)
+ESPCleanupBtn.MouseButton1Click:Connect(cleanupESPInstances)
 
 -- ==========================================
 -- 📍 SECTION 2: WAYPOINT MANAGEMENT
@@ -2977,6 +3079,43 @@ local function setMenuVisible(visible)
 	end
 end
 
+createSectionHeader("Interface", SettingsPage)
+local UISoundToggleBtn = createButton("Interface Sounds: " .. (HubState.UISoundsEnabled and "ON" or "OFF"), SettingsPage, Theme.Surface)
+UISoundToggleBtn.MouseButton1Click:Connect(function()
+	HubState.UISoundsEnabled = not HubState.UISoundsEnabled
+	UISoundToggleBtn.Text = "Interface Sounds: " .. (HubState.UISoundsEnabled and "ON" or "OFF")
+	refreshStatusIndicator()
+end)
+
+local StatusLabel = Instance.new("TextLabel")
+StatusLabel.Size = UDim2.new(1, 0, 0, 64)
+StatusLabel.BackgroundColor3 = Theme.Surface
+StatusLabel.BackgroundTransparency = 0.35
+StatusLabel.BorderSizePixel = 0
+StatusLabel.TextColor3 = Theme.Text
+StatusLabel.Font = Enum.Font.GothamMedium
+StatusLabel.TextSize = 9
+StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+StatusLabel.TextYAlignment = Enum.TextYAlignment.Center
+StatusLabel.TextWrapped = true
+StatusLabel.Text = ""
+StatusLabel.Parent = SettingsPage
+Instance.new("UICorner", StatusLabel).CornerRadius = UDim.new(0, 10)
+local statusPad = Instance.new("UIPadding")
+statusPad.PaddingLeft = UDim.new(0, 12)
+statusPad.PaddingRight = UDim.new(0, 12)
+statusPad.Parent = StatusLabel
+
+local function refreshStatusIndicator()
+	local waypointMode = WaypointPersistenceMode or "Unavailable"
+	local warningMode = WarningPersistenceMode or "Unavailable"
+	local npcState = HubState.NPCToggled and "ON" or "OFF"
+	local playerState = HubState.PlayerToggled and "ON" or "OFF"
+	StatusLabel.Text = "● Gemini Hub Ready\nUI Sounds: " .. (HubState.UISoundsEnabled and "ON" or "OFF") .. "  •  Waypoints: " .. waypointMode .. "  •  Warnings: " .. warningMode .. "\nNPC ESP: " .. npcState .. "  •  Player ESP: " .. playerState .. "  •  Client-side UI"
+	StatusLabel.TextColor3 = Color3.fromRGB(205, 245, 220)
+end
+refreshStatusIndicator()
+
 createSectionHeader("Maintenance", SettingsPage)
 local PurgeBtn = createButton("Reset & Purge All ESP Instances", SettingsPage, Theme.Surface)
 PurgeBtn.MouseButton1Click:Connect(function()
@@ -3026,4 +3165,4 @@ RunService.Stepped:Connect(function()
 	end
 end)
 
-print("💎 Gemini Hub V14.1 Active: Liquid Glass UI • Optimized NPC ESP • Player Warnings • Notifications ❄️💎")
+print("💎 Gemini Hub V14.3 Active: Liquid Glass UI • Optimized NPC ESP • Player Warnings • Notifications ❄️💎")
