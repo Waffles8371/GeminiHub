@@ -71,6 +71,7 @@ local HubState = {
 	AddedSpeed = 10,                
 	SpeedCap = 25,                  
 	OriginalSpeed = 16,             
+	ViewBaselineSpeed = 16,         -- UI-only baseline for the Server View / velocity-cap readout
 	ToggleKeybind = Enum.KeyCode.G,
 	OpenMenuKeybind = Enum.KeyCode.K,
 	IsRebinding = false,
@@ -2588,6 +2589,49 @@ local SpeedToggleBtn = createButton("Speed Engine: OFF", SpeedPage, Theme.Surfac
 local BreakVelToggleBtn = createButton("Break Velocity (Spoof): OFF", SpeedPage, Color3.fromRGB(210, 235, 255))
 local MatchBaseBtn = createButton("Match Base Speed Spoof: ON", SpeedPage, Color3.fromRGB(210, 235, 255))
 
+createSectionHeader("View Baseline", SpeedPage)
+local ViewBaselineFrame = Instance.new("Frame", SpeedPage)
+ViewBaselineFrame.Size = UDim2.new(1, 0, 0, 70)
+ViewBaselineFrame.BackgroundColor3 = Theme.Surface
+ViewBaselineFrame.BackgroundTransparency = 0.42
+ViewBaselineFrame.BorderSizePixel = 0
+local viewBaseCorner = Instance.new("UICorner", ViewBaselineFrame)
+viewBaseCorner.CornerRadius = UDim.new(0, 11)
+local viewBaseStroke = Instance.new("UIStroke", ViewBaselineFrame)
+viewBaseStroke.Color = Theme.White
+viewBaseStroke.Transparency = 0.6
+
+local ViewBaselineInfo = Instance.new("TextLabel", ViewBaselineFrame)
+ViewBaselineInfo.Size = UDim2.new(0.56, -8, 0, 38)
+ViewBaselineInfo.Position = UDim2.new(0, 10, 0, 5)
+ViewBaselineInfo.BackgroundTransparency = 1
+ViewBaselineInfo.Text = "Server WalkSpeed / Velocity Cap View\nCurrent: " .. tostring(HubState.ViewBaselineSpeed)
+ViewBaselineInfo.TextColor3 = Theme.TextSecondary
+ViewBaselineInfo.Font = Enum.Font.GothamBold
+ViewBaselineInfo.TextSize = 10
+ViewBaselineInfo.TextXAlignment = Enum.TextXAlignment.Left
+ViewBaselineInfo.TextYAlignment = Enum.TextYAlignment.Center
+
+local ViewBaselineBox = Instance.new("TextBox", ViewBaselineFrame)
+ViewBaselineBox.Size = UDim2.new(0.28, 0, 0, 30)
+ViewBaselineBox.Position = UDim2.new(0.59, 0, 0, 8)
+ViewBaselineBox.BackgroundColor3 = Theme.White
+ViewBaselineBox.BackgroundTransparency = 0.42
+ViewBaselineBox.Text = tostring(HubState.ViewBaselineSpeed)
+ViewBaselineBox.PlaceholderText = "Speed"
+ViewBaselineBox.TextColor3 = Theme.Text
+ViewBaselineBox.Font = Enum.Font.GothamBold
+ViewBaselineBox.TextSize = 12
+ViewBaselineBox.ClearTextOnFocus = false
+Instance.new("UICorner", ViewBaselineBox).CornerRadius = UDim.new(0, 8)
+
+local ApplyViewBaselineBtn = createButton("Apply", ViewBaselineFrame, Theme.Surface)
+ApplyViewBaselineBtn.Size = UDim2.new(0.12, 0, 0, 30)
+ApplyViewBaselineBtn.Position = UDim2.new(0.87, 0, 0, 8)
+ApplyViewBaselineBtn.TextSize = 10
+local ApplyViewBaselineStatus = ApplyViewBaselineBtn:FindFirstChild("StatusPill")
+if ApplyViewBaselineStatus then ApplyViewBaselineStatus.Visible = false end
+
 local DisplayFrame = Instance.new("Frame", SpeedPage)
 DisplayFrame.Size = UDim2.new(1, 0, 0, 110)
 DisplayFrame.BackgroundColor3 = Theme.Surface
@@ -2634,7 +2678,7 @@ local ServerSpeedLabel = Instance.new("TextLabel", DisplayFrame)
 ServerSpeedLabel.Size = UDim2.new(1, -12, 0, 18)
 ServerSpeedLabel.Position = UDim2.new(0, 10, 0, 66)
 ServerSpeedLabel.BackgroundTransparency = 1
-ServerSpeedLabel.Text = "Server View WalkSpeed: 16"
+ServerSpeedLabel.Text = "Server View WalkSpeed: " .. tostring(HubState.ViewBaselineSpeed)
 ServerSpeedLabel.TextColor3 = Theme.TextSecondary
 ServerSpeedLabel.Font = Enum.Font.GothamBold
 ServerSpeedLabel.TextSize = 11
@@ -2754,6 +2798,25 @@ ApplySpeedBtn.MouseButton1Click:Connect(function()
 	if newAdded then HubState.AddedSpeed = newAdded end
 	if newCap then HubState.SpeedCap = newCap end
 	applySpeedPhysics()
+end)
+
+local function applyViewBaseline()
+	local value = tonumber(ViewBaselineBox.Text)
+	if not value then
+		ViewBaselineBox.Text = tostring(HubState.ViewBaselineSpeed)
+		return
+	end
+
+	value = math.clamp(value, 0, 1000)
+	HubState.ViewBaselineSpeed = value
+	ViewBaselineBox.Text = tostring(value)
+	ViewBaselineInfo.Text = "Server WalkSpeed / Velocity Cap View\nCurrent: " .. tostring(value)
+	ServerSpeedLabel.Text = "Server View WalkSpeed: " .. tostring(value)
+end
+
+ApplyViewBaselineBtn.MouseButton1Click:Connect(applyViewBaseline)
+ViewBaselineBox.FocusLost:Connect(function(enterPressed)
+	if enterPressed then applyViewBaseline() end
 end)
 
 local rawMT = getrawmetatable and getrawmetatable(game)
@@ -2985,6 +3048,13 @@ end)
 LocalPlayer.CharacterAdded:Connect(function(newChar)
 	task.spawn(function()
 		newChar:WaitForChild("HumanoidRootPart", 5)
+		local newHumanoid = newChar:FindFirstChildOfClass("Humanoid")
+		if newHumanoid then
+			HubState.OriginalSpeed = newHumanoid.WalkSpeed
+			HubState.ViewBaselineSpeed = newHumanoid.WalkSpeed
+			if ViewBaselineBox then ViewBaselineBox.Text = tostring(HubState.ViewBaselineSpeed) end
+			if ViewBaselineInfo then ViewBaselineInfo.Text = "Server WalkSpeed / Velocity Cap View\nCurrent: " .. tostring(HubState.ViewBaselineSpeed) end
+		end
 		if HubState.LightToggled then updatePlayerLight() end
 		if HubState.SpeedEngineToggled then applySpeedPhysics() end
 	end)
@@ -3167,8 +3237,8 @@ RunService.Stepped:Connect(function()
 			
 			if HubState.BreakVelocityToggled then
 				if HubState.MatchBaseSpeedToggled then
-					local spoofedMag = math.min(realVel, HubState.OriginalSpeed)
-					SpoofedVelLabel.Text = string.format("Spoofed Vel: %.2f studs/s (Base Matched)", spoofedMag)
+					local spoofedMag = math.min(realVel, HubState.ViewBaselineSpeed)
+					SpoofedVelLabel.Text = string.format("Spoofed Vel: %.2f studs/s (View Cap %.1f)", spoofedMag, HubState.ViewBaselineSpeed)
 				else
 					SpoofedVelLabel.Text = "Spoofed Vel: 0.00 studs/s (Static Zero)"
 				end
@@ -3180,7 +3250,7 @@ RunService.Stepped:Connect(function()
 			SpoofedVelLabel.Text = "Spoofed Velocity (Server View): OFF"
 		end
 		
-		ServerSpeedLabel.Text = "Server View WalkSpeed: " .. tostring(HubState.OriginalSpeed)
+		ServerSpeedLabel.Text = "Server View WalkSpeed: " .. tostring(HubState.ViewBaselineSpeed)
 	end
 end)
 
