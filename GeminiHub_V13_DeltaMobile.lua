@@ -1,0 +1,2404 @@
+-- 💎 GEMINI HUB V13 - DELTA MOBILE COMPATIBILITY UPDATE 💎
+-- Root Cause Fixed: Restored full-spectrum rainbow pickers & shifted theme balance toward aquatic blue with green sliders! 💧🌈🌿
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+local GuiService = game:GetService("GuiService")
+local Workspace = game:GetService("Workspace")
+local TweenService = game:GetService("TweenService")
+local HttpService = game:GetService("HttpService")
+local LocalPlayer = Players.LocalPlayer
+
+-- 🧩 Delta/Xeno compatibility layer.
+-- Prefer the executor global environment when available, but fall back to _G
+-- so optional persistence/keybind state does not hard-fail in restricted environments.
+local GeminiEnv
+do
+	if type(getgenv) == "function" then
+		local ok, env = pcall(getgenv)
+		if ok and type(env) == "table" then
+			GeminiEnv = env
+		end
+	end
+	GeminiEnv = GeminiEnv or _G
+end
+
+-- 🛡️ Safe GUI Parent Finder
+local function getSafeParent()
+	if type(gethui) == "function" then
+		local success, result = pcall(gethui)
+		if success and result then return result end
+	end
+	local success, result = pcall(function() return CoreGui end)
+	if success and result then return result end
+	return LocalPlayer:WaitForChild("PlayerGui")
+end
+
+local safeParent = getSafeParent()
+
+-- 🧹 Cleanup previous GUI instances & connections
+if safeParent:FindFirstChild("GeminiHub") then
+	safeParent.GeminiHub:Destroy()
+end
+
+if GeminiEnv.GeminiKeybindConn then
+	GeminiEnv.GeminiKeybindConn:Disconnect()
+	GeminiEnv.GeminiKeybindConn = nil
+end
+
+-- 📂 Waypoint Folder Setup
+-- The waypoint objects themselves are client-side visuals. Rebuild this folder
+-- from the saved waypoint data each time the hub is loaded so old visual copies
+-- do not stack on top of the restored ones.
+local oldWaypointFolder = Workspace:FindFirstChild("GeminiHub_Waypoints")
+if oldWaypointFolder then
+	oldWaypointFolder:Destroy()
+end
+
+local WaypointFolder = Instance.new("Folder")
+WaypointFolder.Name = "GeminiHub_Waypoints"
+WaypointFolder.Parent = Workspace
+
+-- 🎨 Hub State Engine
+local HubState = {
+	-- ESP Settings
+	NPCToggled = false,
+	NPCFill = 0.5,
+	NPCOutline = 0,
+	PlayerToggled = false,
+	PlayerFill = 0.5,
+	PlayerOutline = 0,
+	PlayerColor = Color3.fromRGB(66, 133, 244),
+	
+	-- Waypoint Settings
+	-- Built-in Roblox waypoint texture, so this does not depend on an external image asset.
+	WaypointColor = Color3.fromRGB(66, 133, 244), -- Blue waypoint pin! 💧
+	WaypointAssetId = "rbxasset://textures/ui/waypoint.png",
+	Waypoints = {},
+	
+	-- ⚡ Speed & Velocity Engine State
+	SpeedEngineToggled = false,
+	BreakVelocityToggled = false,   
+	MatchBaseSpeedToggled = true,   
+	AddedSpeed = 10,                
+	SpeedCap = 25,                  
+	OriginalSpeed = 16,             
+	ToggleKeybind = Enum.KeyCode.G,
+	IsRebinding = false,
+	LastToggleTick = 0,
+
+	-- 💡 Others / Light Engine State
+	LightToggled = false,
+	LightRange = 16,
+	LightBrightness = 2,
+	LightColor = Color3.fromRGB(255, 255, 255),
+	LightShadows = false,
+	
+	-- Others State
+	DaytimeToggled = false,
+	DaytimeValue = 12,
+	FOVToggled = false,
+	HoverToggled = false,
+}
+
+-- ==========================================
+-- 💾 WAYPOINT PERSISTENCE
+-- ==========================================
+-- V12 only kept waypoints inside HubState.Waypoints, so they disappeared when
+-- the script restarted. V13 stores a small JSON file per PlaceId using the
+-- executor filesystem when available, with a same-session getgenv fallback.
+
+local WaypointSaveFolder = "GeminiHub"
+local WaypointSaveFile = WaypointSaveFolder .. "/Waypoints_" .. tostring(game.PlaceId) .. ".json"
+local WaypointPersistenceMode = "Unavailable"
+
+local function ensureWaypointSaveFolder()
+	if type(makefolder) ~= "function" then
+		return true
+	end
+
+	local ok = pcall(function()
+		makefolder(WaypointSaveFolder)
+	end)
+	return ok
+end
+
+local function waypointFileExists(path)
+	if type(isfile) == "function" then
+		local ok, result = pcall(isfile, path)
+		if ok then
+			return result == true
+		end
+	end
+
+	if type(readfile) == "function" then
+		local ok, content = pcall(readfile, path)
+		return ok and type(content) == "string" and #content > 0
+	end
+
+	return false
+end
+
+local function encodeColor3(color)
+	return {
+		R = color.R,
+		G = color.G,
+		B = color.B,
+	}
+end
+
+local function decodeColor3(data, fallback)
+	if type(data) ~= "table" then
+		return fallback
+	end
+
+	local r = tonumber(data.R) or tonumber(data.r)
+	local g = tonumber(data.G) or tonumber(data.g)
+	local b = tonumber(data.B) or tonumber(data.b)
+	if not r or not g or not b then
+		return fallback
+	end
+
+	return Color3.new(
+		math.clamp(r, 0, 1),
+		math.clamp(g, 0, 1),
+		math.clamp(b, 0, 1)
+	)
+end
+
+local function serializeWaypointData()
+	local payload = {
+		Version = 1,
+		WaypointColor = encodeColor3(HubState.WaypointColor),
+		Waypoints = {},
+	}
+
+	for _, wp in ipairs(HubState.Waypoints) do
+		if wp and typeof(wp.Position) == "Vector3" and type(wp.Name) == "string" then
+			table.insert(payload.Waypoints, {
+				Name = wp.Name,
+				Position = {
+					X = wp.Position.X,
+					Y = wp.Position.Y,
+					Z = wp.Position.Z,
+				},
+				Color = encodeColor3(wp.Color or HubState.WaypointColor),
+			})
+		end
+	end
+
+	return payload
+end
+
+local function deserializeWaypointData(payload)
+	if type(payload) ~= "table" then
+		return false
+	end
+
+	local restored = {}
+	if type(payload.Waypoints) == "table" then
+		for _, data in ipairs(payload.Waypoints) do
+			if type(data) == "table" and type(data.Name) == "string" and type(data.Position) == "table" then
+				local x = tonumber(data.Position.X or data.Position.x)
+				local y = tonumber(data.Position.Y or data.Position.y)
+				local z = tonumber(data.Position.Z or data.Position.z)
+				if x and y and z then
+					table.insert(restored, {
+						Name = data.Name,
+						Position = Vector3.new(x, y, z),
+						Color = decodeColor3(data.Color, HubState.WaypointColor),
+					})
+				end
+			end
+		end
+	end
+
+	HubState.Waypoints = restored
+	HubState.WaypointColor = decodeColor3(payload.WaypointColor, HubState.WaypointColor)
+	return true
+end
+
+local function saveWaypoints()
+	local payload = serializeWaypointData()
+	local cacheUpdated = pcall(function()
+		GeminiEnv.GeminiHubWaypointCache = payload
+	end)
+
+	local canUseFilesystem = type(writefile) == "function" and type(readfile) == "function"
+	if canUseFilesystem then
+		ensureWaypointSaveFolder()
+		local encodedOk, encoded = pcall(function()
+			return HttpService:JSONEncode(payload)
+		end)
+
+		if encodedOk and type(encoded) == "string" then
+			local writeOk = pcall(function()
+				writefile(WaypointSaveFile, encoded)
+			end)
+			if writeOk then
+				WaypointPersistenceMode = "Filesystem"
+				return true
+			end
+		end
+	end
+
+	WaypointPersistenceMode = cacheUpdated and "Session Cache" or "Unavailable"
+	return cacheUpdated
+end
+
+local function loadWaypoints()
+	local canUseFilesystem = type(readfile) == "function"
+	if canUseFilesystem and waypointFileExists(WaypointSaveFile) then
+		local readOk, raw = pcall(function()
+			return readfile(WaypointSaveFile)
+		end)
+		if readOk and type(raw) == "string" and #raw > 0 then
+			local decodeOk, payload = pcall(function()
+				return HttpService:JSONDecode(raw)
+			end)
+			if decodeOk and deserializeWaypointData(payload) then
+				WaypointPersistenceMode = "Filesystem"
+				return true
+			end
+		end
+	end
+
+	local cacheOk, cachedPayload = pcall(function()
+		return GeminiEnv.GeminiHubWaypointCache
+	end)
+	if cacheOk and cachedPayload and deserializeWaypointData(cachedPayload) then
+		WaypointPersistenceMode = "Session Cache"
+		return true
+	end
+
+	WaypointPersistenceMode = canUseFilesystem and "Filesystem Ready" or "Unavailable"
+	return false
+end
+
+-- 🧊 Main Window Frame / Liquid Glass UI
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "GeminiHub"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+local pCallScreenInsets = pcall(function()
+	ScreenGui.ScreenInsets = Enum.ScreenInsets.DeviceSafeInsets
+end)
+ScreenGui.Parent = safeParent
+
+-- ==========================================
+-- 💎 GEMINI HUB 12.0 - LIQUID GLASS THEME
+-- ==========================================
+
+local Theme = {
+	-- Main material
+	Panel = Color3.fromRGB(245, 250, 255),
+	PanelBottom = Color3.fromRGB(215, 235, 255),
+
+	-- Reusable glass surfaces
+	Surface = Color3.fromRGB(240, 248, 255),
+	SurfaceHover = Color3.fromRGB(250, 253, 255),
+	SurfacePressed = Color3.fromRGB(225, 240, 255),
+
+	-- Accent
+	Accent = Color3.fromRGB(66, 133, 244),
+	AccentSoft = Color3.fromRGB(190, 220, 255),
+
+	-- Text
+	Text = Color3.fromRGB(30, 45, 60),
+	TextSecondary = Color3.fromRGB(95, 115, 135),
+
+	-- Utility
+	White = Color3.fromRGB(255, 255, 255),
+	Track = Color3.fromRGB(205, 220, 235),
+
+	-- Transparency tuning
+	PanelTransparency = 0.18,
+	SurfaceTransparency = 0.30,
+	BorderTransparency = 0.35,
+}
+
+local TweenFast = TweenInfo.new(
+	0.16,
+	Enum.EasingStyle.Quint,
+	Enum.EasingDirection.Out
+)
+
+local TweenSoft = TweenInfo.new(
+	0.25,
+	Enum.EasingStyle.Quint,
+	Enum.EasingDirection.Out
+)
+
+-- ==========================================
+-- 🪟 MAIN GLASS CARD
+-- ==========================================
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+MainFrame.BackgroundColor3 = Theme.Panel
+MainFrame.BackgroundTransparency = Theme.PanelTransparency
+MainFrame.BorderSizePixel = 0
+MainFrame.ClipsDescendants = true
+MainFrame.Parent = ScreenGui
+
+-- 📱 Responsive shell: desktop keeps the original compact size, while touch
+-- devices use a percentage-based footprint so the hub does not swallow the screen.
+local isTouchDevice = UserInputService.TouchEnabled
+local function updateResponsiveShell()
+	local camera = Workspace.CurrentCamera
+	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+
+	if isTouchDevice then
+		local width = math.clamp(viewport.X * 0.90, 300, 360)
+		local height = math.clamp(viewport.Y * 0.80, 430, 585)
+		MainFrame.Size = UDim2.fromOffset(width, height)
+	else
+		MainFrame.Size = UDim2.fromOffset(360, 585)
+	end
+
+	MainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+end
+
+updateResponsiveShell()
+
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 26)
+MainCorner.Parent = MainFrame
+
+local HubGradient = Instance.new("UIGradient")
+HubGradient.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Theme.Panel),
+	ColorSequenceKeypoint.new(0.55, Theme.Panel),
+	ColorSequenceKeypoint.new(1, Theme.PanelBottom),
+})
+HubGradient.Transparency = NumberSequence.new({
+	NumberSequenceKeypoint.new(0, 0.02),
+	NumberSequenceKeypoint.new(1, 0.10),
+})
+HubGradient.Rotation = 90
+HubGradient.Parent = MainFrame
+
+local MainStroke = Instance.new("UIStroke")
+MainStroke.Color = Theme.White
+MainStroke.Transparency = Theme.BorderTransparency
+MainStroke.Thickness = 1.25
+MainStroke.Parent = MainFrame
+
+-- ✨ Gradient glass highlight on the border itself. Roblox supports UIGradient
+-- as a child of UIStroke, so the highlight follows the rounded border instead
+-- of tinting the whole panel.
+local MainStrokeGradient = Instance.new("UIGradient")
+MainStrokeGradient.Name = "GlassHighlightGradient"
+MainStrokeGradient.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+	ColorSequenceKeypoint.new(0.48, Color3.fromRGB(125, 145, 165)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 255)),
+})
+MainStrokeGradient.Transparency = NumberSequence.new({
+	NumberSequenceKeypoint.new(0, 0.12),
+	NumberSequenceKeypoint.new(0.48, 0.38),
+	NumberSequenceKeypoint.new(1, 0.12),
+})
+MainStrokeGradient.Rotation = 48
+MainStrokeGradient.Parent = MainStroke
+
+-- Real UI shadow. Some third-party Roblox environments may not expose
+-- UIShadow yet, so this is deliberately guarded instead of hard-failing.
+local shadowOk, MainShadow = pcall(function()
+	return Instance.new("UIShadow")
+end)
+
+if shadowOk and MainShadow then
+	local configured = pcall(function()
+		MainShadow.Color = Color3.fromRGB(30, 75, 120)
+		MainShadow.Transparency = 0.72
+		MainShadow.BlurRadius = UDim.new(0, 18)
+		MainShadow.Offset = UDim2.new(0, 0, 0, 7)
+		MainShadow.Spread = UDim2.new(0, 3)
+		MainShadow.Parent = MainFrame
+	end)
+
+	if not configured then
+		MainShadow:Destroy()
+		MainShadow = nil
+	end
+else
+	MainShadow = nil
+	warn("Gemini Hub: UIShadow is unavailable in this Roblox environment; continuing without the UI shadow.")
+end
+
+-- Very subtle top-edge shine to sell the glass material.
+local TopShine = Instance.new("Frame")
+TopShine.Name = "TopShine"
+TopShine.Size = UDim2.new(1, -38, 0, 1)
+TopShine.Position = UDim2.new(0, 19, 0, 2)
+TopShine.BackgroundColor3 = Theme.White
+TopShine.BackgroundTransparency = 0.55
+TopShine.BorderSizePixel = 0
+TopShine.ZIndex = 2
+TopShine.Parent = MainFrame
+
+local TopShineCorner = Instance.new("UICorner")
+TopShineCorner.CornerRadius = UDim.new(1, 0)
+TopShineCorner.Parent = TopShine
+
+-- ==========================================
+-- 🫧 CLIENT VISUAL BLUR
+-- ==========================================
+-- Roblox's BlurEffect affects the 3D world view, not just one GUI card.
+-- It remains client-side when parented to the local player's CurrentCamera.
+
+local existingCamera = Workspace.CurrentCamera
+if existingCamera then
+    local oldBlur = existingCamera:FindFirstChild("GeminiHub_ClientBlur")
+    if oldBlur then
+        oldBlur:Destroy()
+    end
+end
+
+local blurOk, CameraBlur = pcall(function()
+	return Instance.new("BlurEffect")
+end)
+
+local blurActive = false
+
+local function attachCameraBlur()
+	if not blurOk or not CameraBlur then
+		return
+	end
+
+	local camera = Workspace.CurrentCamera
+	if camera then
+		CameraBlur.Parent = camera
+		CameraBlur.Size = blurActive and 3 or 0
+	end
+end
+
+if blurOk and CameraBlur then
+	CameraBlur.Name = "GeminiHub_ClientBlur"
+	CameraBlur.Size = 0
+	CameraBlur.Enabled = true
+	attachCameraBlur()
+
+	Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+		task.defer(attachCameraBlur)
+	end)
+else
+	CameraBlur = nil
+	warn("Gemini Hub: BlurEffect is unavailable in this Roblox environment; continuing without camera blur.")
+end
+
+local function setMenuBlur(enabled)
+	-- Reserved for a future true backdrop-blur implementation. Roblox
+	-- BlurEffect blurs the 3D camera, not the pixels behind a GuiObject.
+	blurActive = false
+	attachCameraBlur()
+end
+
+Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+	task.defer(function()
+		updateResponsiveShell()
+		local camera = Workspace.CurrentCamera
+		if camera then
+			camera:GetPropertyChangedSignal("ViewportSize"):Connect(updateResponsiveShell)
+		end
+	end)
+end)
+
+local initialCamera = Workspace.CurrentCamera
+if initialCamera then
+	initialCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateResponsiveShell)
+end
+
+-- ==========================================
+-- 🖱️ TOP HEADER & DRAGGING
+-- ==========================================
+
+local TopBar = Instance.new("Frame")
+TopBar.Size = UDim2.new(1, 0, 0, 58)
+TopBar.BackgroundTransparency = 1
+TopBar.Parent = MainFrame
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -80, 0, 22)
+Title.Position = UDim2.new(0, 18, 0, 10)
+Title.BackgroundTransparency = 1
+Title.Text = "💎  GEMINI HUB"
+Title.TextColor3 = Theme.Text
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 15
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = TopBar
+
+local Version = Instance.new("TextLabel")
+Version.Size = UDim2.new(1, -80, 0, 16)
+Version.Position = UDim2.new(0, 20, 0, 31)
+Version.BackgroundTransparency = 1
+Version.Text = "v13"
+Version.TextColor3 = Theme.TextSecondary
+Version.Font = Enum.Font.Gotham
+Version.TextSize = 10
+Version.TextXAlignment = Enum.TextXAlignment.Left
+Version.Parent = TopBar
+
+local MinMaxBtn = Instance.new("TextButton")
+MinMaxBtn.Size = UDim2.new(0, 30, 0, 30)
+MinMaxBtn.Position = UDim2.new(1, -44, 0, 14)
+MinMaxBtn.BackgroundColor3 = Theme.White
+MinMaxBtn.BackgroundTransparency = 0.55
+MinMaxBtn.BorderSizePixel = 0
+MinMaxBtn.Text = "−"
+MinMaxBtn.TextColor3 = Theme.Text
+MinMaxBtn.Font = Enum.Font.GothamMedium
+MinMaxBtn.TextSize = 15
+MinMaxBtn.AutoButtonColor = false
+MinMaxBtn.Parent = TopBar
+
+local MinCorner = Instance.new("UICorner")
+MinCorner.CornerRadius = UDim.new(1, 0)
+MinCorner.Parent = MinMaxBtn
+
+local MinStroke = Instance.new("UIStroke")
+MinStroke.Color = Theme.White
+MinStroke.Transparency = 0.35
+MinStroke.Thickness = 1
+MinStroke.Parent = MinMaxBtn
+
+local minimized = false
+
+MinMaxBtn.MouseButton1Click:Connect(function()
+	local currentSize = MainFrame.AbsoluteSize
+	local currentPos = MainFrame.Position
+	minimized = not minimized
+	MinMaxBtn.Text = minimized and "+" or "−"
+
+	local targetSize
+	if minimized then
+		targetSize = UDim2.fromOffset(currentSize.X, 58)
+	else
+		local camera = Workspace.CurrentCamera
+		local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+		if isTouchDevice then
+			targetSize = UDim2.fromOffset(
+				math.clamp(viewport.X * 0.90, 300, 360),
+				math.clamp(viewport.Y * 0.80, 430, 585)
+			)
+		else
+			targetSize = UDim2.fromOffset(360, 585)
+		end
+	end
+
+	-- MainFrame is center-anchored. Move its center by half the height
+	-- difference so the TOP EDGE stays in the same place while collapsing.
+	-- This keeps the pill attached to the header instead of teleporting to
+	-- the middle of the old panel.
+	local targetHeight = targetSize.Y.Offset
+	local heightDelta = targetHeight - currentSize.Y
+	local targetPosition = UDim2.new(
+		currentPos.X.Scale,
+		currentPos.X.Offset,
+		currentPos.Y.Scale,
+		currentPos.Y.Offset + (heightDelta / 2)
+	)
+
+	MainFrame:TweenSizeAndPosition(targetSize, targetPosition, "Out", "Quint", 0.3, true)
+
+	setMenuBlur(not minimized)
+end)
+
+MinMaxBtn.MouseEnter:Connect(function()
+	TweenService:Create(
+		MinMaxBtn,
+		TweenFast,
+		{
+			BackgroundTransparency = 0.25,
+			TextColor3 = Theme.Accent,
+		}
+	):Play()
+end)
+
+MinMaxBtn.MouseLeave:Connect(function()
+	TweenService:Create(
+		MinMaxBtn,
+		TweenFast,
+		{
+			BackgroundTransparency = 0.55,
+			TextColor3 = Theme.Text,
+		}
+	):Play()
+end)
+
+-- 🖐️ Desktop + mobile dragging. TouchPan is specifically supported by GuiObject
+-- and avoids relying on mouse-only events on phones/tablets.
+local dragging = false
+local dragStart
+local startPos
+
+local function beginDrag(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1
+		or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = true
+		dragStart = input.Position
+		startPos = MainFrame.Position
+	end
+end
+
+local function endDrag(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1
+		or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = false
+	end
+end
+
+TopBar.InputBegan:Connect(beginDrag)
+TopBar.InputEnded:Connect(endDrag)
+
+TopBar.TouchPan:Connect(function(_touchPositions, totalTranslation, _velocity, state)
+	if state == Enum.UserInputState.Begin then
+		dragging = true
+		startPos = MainFrame.Position
+	elseif state == Enum.UserInputState.Change and dragging then
+		MainFrame.Position = UDim2.new(
+			startPos.X.Scale,
+			startPos.X.Offset + totalTranslation.X,
+			startPos.Y.Scale,
+			startPos.Y.Offset + totalTranslation.Y
+		)
+	elseif state == Enum.UserInputState.End then
+		dragging = false
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+		local delta = input.Position - dragStart
+		MainFrame.Position = UDim2.new(
+			startPos.X.Scale,
+			startPos.X.Offset + delta.X,
+			startPos.Y.Scale,
+			startPos.Y.Offset + delta.Y
+		)
+	end
+end)
+
+-- ==========================================
+-- 🏷️ LIQUID GLASS TAB STRIP
+-- ==========================================
+
+local TabBar = Instance.new("Frame")
+TabBar.Name = "TabBar"
+TabBar.Size = UDim2.new(1, -20, 0, 40)
+TabBar.Position = UDim2.new(0, 10, 0, 64)
+TabBar.BackgroundColor3 = Theme.White
+TabBar.BackgroundTransparency = 0.70
+TabBar.BorderSizePixel = 0
+TabBar.ZIndex = 5
+TabBar.Parent = MainFrame
+
+local TabCorner = Instance.new("UICorner")
+TabCorner.CornerRadius = UDim.new(0, 14)
+TabCorner.Parent = TabBar
+
+local TabStroke = Instance.new("UIStroke")
+TabStroke.Color = Theme.White
+TabStroke.Transparency = 0.52
+TabStroke.Thickness = 1
+TabStroke.Parent = TabBar
+
+local TabPadding = Instance.new("UIPadding")
+TabPadding.PaddingLeft = UDim.new(0, 5)
+TabPadding.PaddingRight = UDim.new(0, 5)
+TabPadding.PaddingTop = UDim.new(0, 4)
+TabPadding.PaddingBottom = UDim.new(0, 4)
+TabPadding.Parent = TabBar
+
+local TabListLayout = Instance.new("UIListLayout")
+TabListLayout.FillDirection = Enum.FillDirection.Horizontal
+TabListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+TabListLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+TabListLayout.Padding = UDim.new(0, 4)
+TabListLayout.Parent = TabBar
+
+local Containers = {}
+local ActiveTabName = "ESP"
+
+local function setTabVisual(btn, active, instant)
+	local targetBackground = active and 0.20 or 0.88
+	local targetText = active and Theme.Accent or Theme.TextSecondary
+
+	if instant then
+		btn.BackgroundTransparency = targetBackground
+		btn.TextColor3 = targetText
+	else
+		TweenService:Create(
+			btn,
+			TweenFast,
+			{
+				BackgroundTransparency = targetBackground,
+				TextColor3 = targetText,
+			}
+		):Play()
+	end
+
+	local stroke = btn:FindFirstChild("TabStroke")
+	if stroke then
+		if instant then
+			stroke.Transparency = active and 0.32 or 1
+		else
+			TweenService:Create(
+				stroke,
+				TweenFast,
+				{Transparency = active and 0.32 or 1}
+			):Play()
+		end
+	end
+end
+
+local function activateTab(name)
+	ActiveTabName = name
+
+	for tabName, tab in pairs(Containers) do
+		local active = tabName == name
+		tab.Page.Visible = active
+		setTabVisual(tab.Button, active, false)
+	end
+end
+
+local function createTab(name, _pastelBaseColor)
+	local btn = Instance.new("TextButton")
+	btn.Name = name .. "Tab"
+	btn.Size = UDim2.new(0.2, -4, 0, 32)
+	btn.BackgroundColor3 = Theme.White
+	btn.BackgroundTransparency = 0.88
+	btn.BorderSizePixel = 0
+	btn.AutoButtonColor = false
+	btn.Text = name
+	btn.TextColor3 = Theme.TextSecondary
+	btn.Font = Enum.Font.GothamMedium
+	btn.TextSize = 10
+	btn.ZIndex = 6
+	btn.Parent = TabBar
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 10)
+	corner.Parent = btn
+
+	local btnStroke = Instance.new("UIStroke")
+	btnStroke.Name = "TabStroke"
+	btnStroke.Color = Theme.Accent
+	btnStroke.Transparency = 1
+	btnStroke.Thickness = 1
+	btnStroke.Parent = btn
+
+	local page = Instance.new("ScrollingFrame")
+	page.Name = name .. "Page"
+	page.Size = UDim2.new(1, -20, 1, -122)
+	page.Position = UDim2.new(0, 10, 0, 114)
+	page.BackgroundTransparency = 1
+	page.BorderSizePixel = 0
+	page.ScrollBarThickness = 2
+	page.ScrollBarImageColor3 = Theme.Accent
+	page.ScrollBarImageTransparency = 0.55
+	page.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	page.CanvasSize = UDim2.new(0, 0, 0, 0)
+	page.ScrollingDirection = Enum.ScrollingDirection.Y
+	page.Visible = false
+	page.ZIndex = 3
+	page.Parent = MainFrame
+
+	local PagePadding = Instance.new("UIPadding")
+	PagePadding.PaddingLeft = UDim.new(0, 2)
+	PagePadding.PaddingRight = UDim.new(0, 5)
+	PagePadding.PaddingTop = UDim.new(0, 3)
+	PagePadding.PaddingBottom = UDim.new(0, 8)
+	PagePadding.Parent = page
+
+	local layout = Instance.new("UIListLayout")
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, 9)
+	layout.Parent = page
+
+	local pageData = {
+		Button = btn,
+		Page = page,
+	}
+
+	Containers[name] = pageData
+
+	btn.MouseButton1Click:Connect(function()
+		activateTab(name)
+	end)
+
+	btn.MouseEnter:Connect(function()
+		if ActiveTabName ~= name then
+			TweenService:Create(
+				btn,
+				TweenFast,
+				{
+					BackgroundTransparency = 0.72,
+					TextColor3 = Theme.Text,
+				}
+			):Play()
+		end
+	end)
+
+	btn.MouseLeave:Connect(function()
+		if ActiveTabName ~= name then
+			TweenService:Create(
+				btn,
+				TweenFast,
+				{
+					BackgroundTransparency = 0.88,
+					TextColor3 = Theme.TextSecondary,
+				}
+			):Play()
+		end
+	end)
+
+	return page
+end
+
+-- ==========================================
+-- 🧩 SECTION / COMPONENT BUILDERS
+-- ==========================================
+
+local function createSectionHeader(titleText, parent)
+	local container = Instance.new("Frame")
+	container.Size = UDim2.new(1, 0, 0, 28)
+	container.BackgroundTransparency = 1
+	container.ZIndex = 4
+	container.Parent = parent
+
+	local dot = Instance.new("Frame")
+	dot.Size = UDim2.new(0, 6, 0, 6)
+	dot.Position = UDim2.new(0, 2, 0.5, -3)
+	dot.BackgroundColor3 = Theme.Accent
+	dot.BorderSizePixel = 0
+	dot.Parent = container
+
+	local dotCorner = Instance.new("UICorner")
+	dotCorner.CornerRadius = UDim.new(1, 0)
+	dotCorner.Parent = dot
+
+	local title = Instance.new("TextLabel")
+	title.Size = UDim2.new(0, 120, 1, 0)
+	title.Position = UDim2.new(0, 14, 0, 0)
+	title.BackgroundTransparency = 1
+	title.Text = titleText
+	title.TextColor3 = Theme.Text
+	title.Font = Enum.Font.GothamBold
+	title.TextSize = 11
+	title.TextXAlignment = Enum.TextXAlignment.Left
+	title.Parent = container
+
+	local line = Instance.new("Frame")
+	line.Size = UDim2.new(1, -145, 0, 1)
+	line.Position = UDim2.new(0, 139, 0.5, 0)
+	line.BackgroundColor3 = Theme.White
+	line.BackgroundTransparency = 0.58
+	line.BorderSizePixel = 0
+	line.Parent = container
+
+	return container
+end
+
+local function createButton(text, parent, _pastelColor)
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(1, 0, 0, 42)
+	btn.BackgroundColor3 = Theme.Surface
+	btn.BackgroundTransparency = 0.34
+	btn.BorderSizePixel = 0
+	btn.Text = text
+	btn.TextColor3 = Theme.Text
+	btn.Font = Enum.Font.GothamMedium
+	btn.TextSize = 11
+	btn.TextXAlignment = Enum.TextXAlignment.Left
+	btn.AutoButtonColor = false
+	btn.Parent = parent
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 12)
+	corner.Parent = btn
+
+	local padding = Instance.new("UIPadding")
+	padding.PaddingLeft = UDim.new(0, 14)
+	padding.PaddingRight = UDim.new(0, 56)
+	padding.Parent = btn
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Theme.White
+	stroke.Transparency = 0.55
+	stroke.Thickness = 1
+	stroke.Parent = btn
+
+	-- Toggle/status capsule. It automatically reacts when existing feature
+	-- code changes btn.Text to an ON/OFF state.
+	local status = Instance.new("Frame")
+	status.Name = "StatusPill"
+	status.Size = UDim2.new(0, 38, 0, 20)
+	status.Position = UDim2.new(1, -50, 0.5, -10)
+	status.BackgroundColor3 = Theme.Track
+	status.BackgroundTransparency = 0.20
+	status.BorderSizePixel = 0
+	status.Visible = false
+	status.ZIndex = btn.ZIndex + 1
+	status.Parent = btn
+
+	local statusCorner = Instance.new("UICorner")
+	statusCorner.CornerRadius = UDim.new(1, 0)
+	statusCorner.Parent = status
+
+	local knob = Instance.new("Frame")
+	knob.Name = "Knob"
+	knob.Size = UDim2.new(0, 14, 0, 14)
+	knob.Position = UDim2.new(0, 3, 0.5, -7)
+	knob.BackgroundColor3 = Theme.White
+	knob.BorderSizePixel = 0
+	knob.ZIndex = status.ZIndex + 1
+	knob.Parent = status
+
+	local knobCorner = Instance.new("UICorner")
+	knobCorner.CornerRadius = UDim.new(1, 0)
+	knobCorner.Parent = knob
+
+	local function updateStatusVisual()
+		local upper = string.upper(btn.Text)
+		local isOn = string.find(upper, "ON", 1, true) ~= nil
+		local isOff = string.find(upper, "OFF", 1, true) ~= nil
+
+		status.Visible = isOn or isOff
+
+		if not status.Visible then
+			return
+		end
+
+		TweenService:Create(
+			status,
+			TweenFast,
+			{
+				BackgroundColor3 = isOn and Theme.Accent or Theme.Track,
+				BackgroundTransparency = isOn and 0.12 or 0.18,
+			}
+		):Play()
+
+		TweenService:Create(
+			knob,
+			TweenFast,
+			{
+				Position = isOn
+					and UDim2.new(1, -17, 0.5, -7)
+					or UDim2.new(0, 3, 0.5, -7),
+			}
+		):Play()
+	end
+
+	btn:GetPropertyChangedSignal("Text"):Connect(updateStatusVisual)
+	updateStatusVisual()
+
+	btn.MouseEnter:Connect(function()
+		TweenService:Create(
+			btn,
+			TweenFast,
+			{
+				BackgroundTransparency = 0.18,
+				BackgroundColor3 = Theme.SurfaceHover,
+			}
+		):Play()
+	end)
+
+	btn.MouseLeave:Connect(function()
+		TweenService:Create(
+			btn,
+			TweenFast,
+			{
+				BackgroundTransparency = 0.34,
+				BackgroundColor3 = Theme.Surface,
+			}
+		):Play()
+	end)
+
+	btn.MouseButton1Down:Connect(function()
+		TweenService:Create(
+			btn,
+			TweenFast,
+			{
+				BackgroundTransparency = 0.08,
+				BackgroundColor3 = Theme.SurfacePressed,
+			}
+		):Play()
+	end)
+
+	btn.MouseButton1Up:Connect(function()
+		TweenService:Create(
+			btn,
+			TweenFast,
+			{
+				BackgroundTransparency = 0.18,
+				BackgroundColor3 = Theme.SurfaceHover,
+			}
+		):Play()
+	end)
+
+	return btn
+end
+
+local function createSlider(name, default, minVal, maxVal, parent, callback)
+	local container = Instance.new("Frame")
+	container.Size = UDim2.new(1, 0, 0, 52)
+	container.BackgroundTransparency = 1
+	container.Parent = parent
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(0.70, 0, 0, 18)
+	label.Position = UDim2.new(0, 1, 0, 0)
+	label.BackgroundTransparency = 1
+	label.Text = name
+	label.TextColor3 = Theme.Text
+	label.Font = Enum.Font.GothamMedium
+	label.TextSize = 10.5
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.Parent = container
+
+	local valueLabel = Instance.new("TextLabel")
+	valueLabel.Size = UDim2.new(0.30, -1, 0, 18)
+	valueLabel.Position = UDim2.new(0.70, 0, 0, 0)
+	valueLabel.BackgroundTransparency = 1
+	valueLabel.TextColor3 = Theme.TextSecondary
+	valueLabel.Font = Enum.Font.GothamMedium
+	valueLabel.TextSize = 10
+	valueLabel.TextXAlignment = Enum.TextXAlignment.Right
+	valueLabel.Parent = container
+
+	local track = Instance.new("TextButton")
+	track.Size = UDim2.new(1, 0, 0, 8)
+	track.Position = UDim2.new(0, 0, 0, 31)
+	track.BackgroundColor3 = Theme.Track
+	track.BackgroundTransparency = 0.20
+	track.BorderSizePixel = 0
+	track.Text = ""
+	track.AutoButtonColor = false
+	track.Parent = container
+
+	local trackCorner = Instance.new("UICorner")
+	trackCorner.CornerRadius = UDim.new(1, 0)
+	trackCorner.Parent = track
+
+	local initialAlpha = math.clamp((default - minVal) / (maxVal - minVal), 0, 1)
+
+	local fill = Instance.new("Frame")
+	fill.Size = UDim2.new(initialAlpha, 0, 1, 0)
+	fill.BackgroundColor3 = Theme.Accent
+	fill.BackgroundTransparency = 0
+	fill.BorderSizePixel = 0
+	fill.Parent = track
+
+	local fillCorner = Instance.new("UICorner")
+	fillCorner.CornerRadius = UDim.new(1, 0)
+	fillCorner.Parent = fill
+
+	local knob = Instance.new("Frame")
+	knob.Size = UDim2.new(0, 14, 0, 14)
+	knob.AnchorPoint = Vector2.new(0.5, 0.5)
+	knob.Position = UDim2.new(initialAlpha, 0, 0.5, 0)
+	knob.BackgroundColor3 = Theme.White
+	knob.BorderSizePixel = 0
+	knob.ZIndex = track.ZIndex + 2
+	knob.Parent = track
+
+	local knobCorner = Instance.new("UICorner")
+	knobCorner.CornerRadius = UDim.new(1, 0)
+	knobCorner.Parent = knob
+
+	local knobStroke = Instance.new("UIStroke")
+	knobStroke.Color = Theme.Accent
+	knobStroke.Transparency = 0.25
+	knobStroke.Thickness = 1
+	knobStroke.Parent = knob
+
+	local sliding = false
+
+	local function setValueFromX(pointerX)
+		local relX = math.clamp(
+			(pointerX - track.AbsolutePosition.X) / track.AbsoluteSize.X,
+			0,
+			1
+		)
+
+		fill.Size = UDim2.new(relX, 0, 1, 0)
+		knob.Position = UDim2.new(relX, 0, 0.5, 0)
+
+		local val = minVal + (relX * (maxVal - minVal))
+		val = math.floor(val * 10) / 10
+		valueLabel.Text = tostring(val)
+		callback(val)
+	end
+
+	local function beginSlider(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			sliding = true
+			setValueFromX(input.Position.X)
+		end
+	end
+
+	track.InputBegan:Connect(beginSlider)
+
+	track.MouseEnter:Connect(function()
+		TweenService:Create(knobStroke, TweenFast, {Transparency = 0}):Play()
+	end)
+
+	track.MouseLeave:Connect(function()
+		if not sliding then
+			TweenService:Create(knobStroke, TweenFast, {Transparency = 0.25}):Play()
+		end
+	end)
+
+	UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			sliding = false
+			TweenService:Create(knobStroke, TweenFast, {Transparency = 0.25}):Play()
+		end
+	end)
+
+	UserInputService.InputChanged:Connect(function(input)
+		if sliding and (input.UserInputType == Enum.UserInputType.MouseMovement
+			or input.UserInputType == Enum.UserInputType.Touch) then
+			setValueFromX(input.Position.X)
+		end
+	end)
+
+	track.TouchPan:Connect(function(touchPositions, _totalTranslation, _velocity, state)
+		if state == Enum.UserInputState.Begin then
+			sliding = true
+			local touch = touchPositions and touchPositions[1]
+			if touch then
+				setValueFromX(touch.X)
+			end
+		elseif state == Enum.UserInputState.Change and sliding then
+			local touch = touchPositions and touchPositions[1]
+			if touch then
+				setValueFromX(touch.X)
+			end
+		elseif state == Enum.UserInputState.End then
+			sliding = false
+		end
+	end)
+
+	valueLabel.Text = tostring(math.floor(default * 10) / 10)
+end
+
+local function create2DColorPicker(titleText, defaultColor, parent, callback)
+	local container = Instance.new("Frame")
+	container.Size = UDim2.new(1, 0, 0, 114)
+	container.BackgroundColor3 = Theme.Surface
+	container.BackgroundTransparency = 0.48
+	container.BorderSizePixel = 0
+	container.Parent = parent
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 13)
+	corner.Parent = container
+
+	local border = Instance.new("UIStroke")
+	border.Color = Theme.White
+	border.Transparency = 0.60
+	border.Thickness = 1
+	border.Parent = container
+
+	local header = Instance.new("Frame")
+	header.Size = UDim2.new(1, -16, 0, 18)
+	header.Position = UDim2.new(0, 8, 0, 7)
+	header.BackgroundTransparency = 1
+	header.Parent = container
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(1, -30, 1, 0)
+	label.BackgroundTransparency = 1
+	label.Text = titleText
+	label.TextColor3 = Theme.Text
+	label.Font = Enum.Font.GothamMedium
+	label.TextSize = 10.5
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.Parent = header
+
+	local preview = Instance.new("Frame")
+	preview.Size = UDim2.new(0, 16, 0, 16)
+	preview.AnchorPoint = Vector2.new(1, 0)
+	preview.Position = UDim2.new(1, 0, 0, 1)
+	preview.BackgroundColor3 = defaultColor
+	preview.BorderSizePixel = 0
+	preview.Parent = header
+
+	local previewCorner = Instance.new("UICorner")
+	previewCorner.CornerRadius = UDim.new(1, 0)
+	previewCorner.Parent = preview
+
+	local previewStroke = Instance.new("UIStroke")
+	previewStroke.Color = Theme.White
+	previewStroke.Transparency = 0.35
+	previewStroke.Parent = preview
+
+	local canvas = Instance.new("TextButton")
+	canvas.Size = UDim2.new(1, -16, 0, 76)
+	canvas.Position = UDim2.new(0, 8, 0, 31)
+	canvas.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	canvas.BackgroundTransparency = 0.03
+	canvas.BorderSizePixel = 0
+	canvas.AutoButtonColor = false
+	canvas.Text = ""
+	canvas.Parent = container
+
+	local canvasCorner = Instance.new("UICorner")
+	canvasCorner.CornerRadius = UDim.new(0, 10)
+	canvasCorner.Parent = canvas
+
+	local hueGrad = Instance.new("UIGradient")
+	hueGrad.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 0)),
+		ColorSequenceKeypoint.new(0.17, Color3.fromRGB(255, 255, 0)),
+		ColorSequenceKeypoint.new(0.33, Color3.fromRGB(0, 255, 0)),
+		ColorSequenceKeypoint.new(0.5, Color3.fromRGB(0, 255, 255)),
+		ColorSequenceKeypoint.new(0.67, Color3.fromRGB(0, 0, 255)),
+		ColorSequenceKeypoint.new(0.83, Color3.fromRGB(255, 0, 255)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 0, 0)),
+	})
+	hueGrad.Parent = canvas
+
+	-- Subtle vertical light-to-dark value overlay.
+	local valueOverlay = Instance.new("Frame")
+	valueOverlay.Size = UDim2.new(1, 0, 1, 0)
+	valueOverlay.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	valueOverlay.BackgroundTransparency = 1
+	valueOverlay.BorderSizePixel = 0
+	valueOverlay.Parent = canvas
+
+	local valueGradient = Instance.new("UIGradient")
+	valueGradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 0, 0)),
+	})
+	valueGradient.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.78),
+		NumberSequenceKeypoint.new(0.55, 0.84),
+		NumberSequenceKeypoint.new(1, 0.35),
+	})
+	valueGradient.Rotation = 90
+	valueGradient.Parent = valueOverlay
+
+	local dot = Instance.new("Frame")
+	dot.Size = UDim2.new(0, 11, 0, 11)
+	dot.AnchorPoint = Vector2.new(0.5, 0.5)
+	dot.BackgroundColor3 = Theme.White
+	dot.BorderSizePixel = 0
+	dot.ZIndex = canvas.ZIndex + 3
+	dot.Parent = canvas
+
+	local dotCorner = Instance.new("UICorner")
+	dotCorner.CornerRadius = UDim.new(1, 0)
+	dotCorner.Parent = dot
+
+	local dotStroke = Instance.new("UIStroke")
+	dotStroke.Color = Color3.fromRGB(25, 35, 45)
+	dotStroke.Transparency = 0.10
+	dotStroke.Thickness = 1.5
+	dotStroke.Parent = dot
+
+	local h = Color3.toHSV(defaultColor)
+	local defaultHue, _, defaultValue = Color3.toHSV(defaultColor)
+	local defaultY = math.clamp((1 - defaultValue) * 2, 0, 1)
+	dot.Position = UDim2.new(defaultHue, 0, defaultY, 0)
+
+	local draggingColor = false
+
+	local function updateColor(input)
+		local relX = math.clamp(
+			(input.Position.X - canvas.AbsolutePosition.X) / canvas.AbsoluteSize.X,
+			0,
+			1
+		)
+
+		local relY = math.clamp(
+			(input.Position.Y - canvas.AbsolutePosition.Y) / canvas.AbsoluteSize.Y,
+			0,
+			1
+		)
+
+		dot.Position = UDim2.new(relX, 0, relY, 0)
+
+		local newCol = Color3.fromHSV(
+			relX,
+			1,
+			1 - (relY * 0.5)
+		)
+
+		preview.BackgroundColor3 = newCol
+		callback(newCol)
+	end
+
+	canvas.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			draggingColor = true
+			updateColor(input)
+		end
+	end)
+
+	UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			draggingColor = false
+		end
+	end)
+
+	UserInputService.InputChanged:Connect(function(input)
+		if draggingColor and (input.UserInputType == Enum.UserInputType.MouseMovement
+			or input.UserInputType == Enum.UserInputType.Touch) then
+			updateColor(input)
+		end
+	end)
+
+	canvas.TouchPan:Connect(function(touchPositions, _totalTranslation, _velocity, state)
+		if state == Enum.UserInputState.Begin then
+			draggingColor = true
+			local touch = touchPositions and touchPositions[1]
+			if touch then
+				updateColor({Position = touch})
+			end
+		elseif state == Enum.UserInputState.Change and draggingColor then
+			local touch = touchPositions and touchPositions[1]
+			if touch then
+				updateColor({Position = touch})
+			end
+		elseif state == Enum.UserInputState.End then
+			draggingColor = false
+		end
+	end)
+end
+
+-- ==========================================
+-- 💠 CREATE TABS
+-- ==========================================
+
+local ESPPage = createTab("ESP", Theme.AccentSoft)
+local WaypointPage = createTab("Pins", Theme.AccentSoft)
+local SpeedPage = createTab("Speed", Theme.AccentSoft)
+local OthersPage = createTab("Others", Theme.AccentSoft)
+local SettingsPage = createTab("Config", Theme.AccentSoft)
+
+Containers["ESP"].Page.Visible = true
+setTabVisual(Containers["ESP"].Button, true, true)
+
+-- ==========================================
+-- 💊 HEALTH BAR ENGINE
+-- ==========================================
+local function applyHealthBar(character, humanoid, tagPrefix, alwaysOnTop)
+	local rootPart = character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Head") or character:FindFirstChildWhichIsA("BasePart")
+	if not rootPart then return end
+	
+	if rootPart:FindFirstChild(tagPrefix.."_HEALTH_BAR") then
+		rootPart[tagPrefix.."_HEALTH_BAR"]:Destroy()
+	end
+	
+	local bb = Instance.new("BillboardGui")
+	bb.Name = tagPrefix.."_HEALTH_BAR"
+	bb.Adornee = rootPart
+	bb.Size = UDim2.new(0, 65, 0, 12)
+	bb.StudsOffset = Vector3.new(0, 3.2, 0)
+	bb.AlwaysOnTop = alwaysOnTop
+	bb.Parent = rootPart
+	
+	local bg = Instance.new("Frame", bb)
+	bg.Name = "HealthBackground"
+	bg.Size = UDim2.new(1, 0, 1, 0)
+	bg.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	bg.BackgroundTransparency = 0.2
+	Instance.new("UICorner", bg).CornerRadius = UDim.new(1, 0)
+	
+	local stroke = Instance.new("UIStroke", bg)
+	stroke.Color = Color3.fromRGB(200, 220, 240); stroke.Transparency = 0.4
+	
+	local fill = Instance.new("Frame", bg)
+	fill.Name = "HealthFill"
+	fill.Size = UDim2.new(math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1), 0, 1, 0)
+	-- Player health bars inherit the exact Player ESP highlight color.
+	-- NPC bars keep the neutral hub accent.
+	fill.BackgroundColor3 = (tagPrefix == "PLAYER") and HubState.PlayerColor or Theme.Accent
+	Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
+	
+	local hpText = Instance.new("TextLabel", bg)
+	hpText.Size = UDim2.new(1, 0, 1, 0)
+	hpText.BackgroundTransparency = 1
+	hpText.Text = math.floor(humanoid.Health) .. " / " .. math.floor(humanoid.MaxHealth)
+	hpText.TextColor3 = Color3.fromRGB(30, 45, 60)
+	hpText.Font = Enum.Font.GothamBold
+	hpText.TextSize = 9
+	hpText.ZIndex = 2
+	
+	local conn
+	conn = humanoid.HealthChanged:Connect(function(health)
+		if not bb or not bb.Parent then conn:Disconnect() return end
+		fill.Size = UDim2.new(math.clamp(health / humanoid.MaxHealth, 0, 1), 0, 1, 0)
+		hpText.Text = math.floor(health) .. " / " .. math.floor(humanoid.MaxHealth)
+	end)
+end
+
+-- ==========================================
+-- 🤖 SECTION 1: NPC & PLAYER ESP LOGIC
+-- ==========================================
+createSectionHeader("NPCs", ESPPage)
+local NPCToggleBtn = createButton("Toggle NPC ESP: OFF", ESPPage, Theme.Surface)
+local NPCUpdateBtn = createButton("Refresh Scan NPCs", ESPPage, Color3.fromRGB(215, 235, 255))
+
+createSlider("NPC Fill Transparency", HubState.NPCFill, 0, 1, ESPPage, function(val) 
+	HubState.NPCFill = val 
+	for _, v in pairs(Workspace:GetDescendants()) do
+		if v:IsA("Highlight") and v.Name == "NPC_HIGHLIGHT" then v.FillTransparency = val end
+	end
+end)
+createSlider("NPC Outline Transparency", HubState.NPCOutline, 0, 1, ESPPage, function(val) 
+	HubState.NPCOutline = val 
+	for _, v in pairs(Workspace:GetDescendants()) do
+		if v:IsA("Highlight") and v.Name == "NPC_HIGHLIGHT" then v.OutlineTransparency = val end
+	end
+end)
+
+local function applyNPC(model)
+	if not HubState.NPCToggled then return end
+	if Players:GetPlayerFromCharacter(model) then return end
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		if not model:FindFirstChild("NPC_HIGHLIGHT") then
+			local h = Instance.new("Highlight")
+			h.Name = "NPC_HIGHLIGHT"
+			h.FillColor = Color3.fromRGB(255, 255, 255)
+			h.FillTransparency = HubState.NPCFill
+			h.OutlineColor = Color3.fromRGB(150, 200, 240)
+			h.OutlineTransparency = HubState.NPCOutline
+			h.Parent = model
+		end
+		applyHealthBar(model, humanoid, "NPC", false)
+	end
+end
+
+local function updateNPCESP()
+	for _, v in pairs(Workspace:GetDescendants()) do
+		if v:IsA("Highlight") and v.Name == "NPC_HIGHLIGHT" then v:Destroy() end
+		if v:IsA("BillboardGui") and string.find(v.Name, "NPC_HEALTH_BAR") then v:Destroy() end
+	end
+	if not HubState.NPCToggled then return end
+	for _, descendant in pairs(Workspace:GetDescendants()) do
+		if descendant:IsA("Humanoid") then
+			local model = descendant.Parent
+			if model and model:IsA("Model") then applyNPC(model) end
+		end
+	end
+end
+
+NPCToggleBtn.MouseButton1Click:Connect(function()
+	HubState.NPCToggled = not HubState.NPCToggled
+	NPCToggleBtn.Text = "Toggle NPC ESP: " .. (HubState.NPCToggled and "ON" or "OFF")
+	updateNPCESP()
+end)
+NPCUpdateBtn.MouseButton1Click:Connect(function() updateNPCESP() end)
+
+task.spawn(function()
+	while task.wait(2) do
+		if HubState.NPCToggled then
+			for _, descendant in pairs(Workspace:GetDescendants()) do
+				if descendant:IsA("Humanoid") then
+					local model = descendant.Parent
+					if model and model:IsA("Model") and not model:FindFirstChild("NPC_HIGHLIGHT") then
+						applyNPC(model)
+					end
+				end
+			end
+		end
+	end
+end)
+
+createSectionHeader("Players", ESPPage)
+local PlayerToggleBtn = createButton("Toggle Player ESP: OFF", ESPPage, Theme.Surface)
+
+createSlider("Player Fill Transparency", HubState.PlayerFill, 0, 1, ESPPage, function(val) 
+	HubState.PlayerFill = val 
+	for _, v in pairs(Players:GetPlayers()) do
+		if v.Character and v.Character:FindFirstChild("PLAYER_HIGHLIGHT") then
+			v.Character.PLAYER_HIGHLIGHT.FillTransparency = val
+		end
+	end
+end)
+
+createSlider("Player Outline", HubState.PlayerOutline, 0, 1, ESPPage, function(val) 
+	HubState.PlayerOutline = val 
+	for _, v in pairs(Players:GetPlayers()) do
+		if v.Character and v.Character:FindFirstChild("PLAYER_HIGHLIGHT") then
+			v.Character.PLAYER_HIGHLIGHT.OutlineTransparency = val
+		end
+	end
+end)
+
+createSectionHeader("Highlight", ESPPage)
+create2DColorPicker("Player Highlight Color", HubState.PlayerColor, ESPPage, function(newColor)
+	HubState.PlayerColor = newColor
+	for _, plr in pairs(Players:GetPlayers()) do
+		if plr.Character then
+			local highlight = plr.Character:FindFirstChild("PLAYER_HIGHLIGHT")
+			if highlight then
+				highlight.FillColor = newColor
+				highlight.OutlineColor = newColor
+			end
+
+			local root = plr.Character:FindFirstChild("HumanoidRootPart") or plr.Character:FindFirstChild("Head")
+			local healthBar = root and root:FindFirstChild("PLAYER_HEALTH_BAR")
+			local healthBg = healthBar and healthBar:FindFirstChild("HealthBackground")
+			local healthFill = healthBg and healthBg:FindFirstChild("HealthFill")
+			if healthFill then
+				healthFill.BackgroundColor3 = newColor
+			end
+		end
+	end
+end)
+
+local function updateSinglePlayer(plr)
+	if plr == LocalPlayer then return end
+	local char = plr.Character
+	if not char then return end
+	local humanoid = char:FindFirstChildOfClass("Humanoid")
+	if not humanoid then return end
+	
+	if char:FindFirstChild("PLAYER_HIGHLIGHT") then char.PLAYER_HIGHLIGHT:Destroy() end
+	local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Head")
+	if root and root:FindFirstChild("PLAYER_HEALTH_BAR") then root.PLAYER_HEALTH_BAR:Destroy() end
+	
+	if HubState.PlayerToggled then
+		local h = Instance.new("Highlight")
+		h.Name = "PLAYER_HIGHLIGHT"
+		h.FillColor = HubState.PlayerColor
+		h.FillTransparency = HubState.PlayerFill
+		h.OutlineColor = HubState.PlayerColor
+		h.OutlineTransparency = HubState.PlayerOutline
+		h.Parent = char
+		applyHealthBar(char, humanoid, "PLAYER", true)
+	end
+end
+
+local function setupPlayerListeners(plr)
+	plr.CharacterAdded:Connect(function(char)
+		task.wait(1) 
+		if HubState.PlayerToggled then updateSinglePlayer(plr) end
+	end)
+end
+for _, plr in pairs(Players:GetPlayers()) do setupPlayerListeners(plr) end
+Players.PlayerAdded:Connect(setupPlayerListeners)
+
+PlayerToggleBtn.MouseButton1Click:Connect(function()
+	HubState.PlayerToggled = not HubState.PlayerToggled
+	PlayerToggleBtn.Text = "Toggle Player ESP: " .. (HubState.PlayerToggled and "ON" or "OFF")
+	for _, plr in pairs(Players:GetPlayers()) do updateSinglePlayer(plr) end
+end)
+
+-- ==========================================
+-- 📍 SECTION 2: WAYPOINT MANAGEMENT
+-- ==========================================
+loadWaypoints()
+
+createSectionHeader("Waypoint Manager", WaypointPage)
+create2DColorPicker("Waypoint Pin Color", HubState.WaypointColor, WaypointPage, function(newColor)
+	HubState.WaypointColor = newColor
+	saveWaypoints()
+end)
+
+local WaypointNameBox = Instance.new("TextBox", WaypointPage)
+WaypointNameBox.Size = UDim2.new(1, 0, 0, 36)
+WaypointNameBox.BackgroundColor3 = Theme.Surface
+WaypointNameBox.BackgroundTransparency = 0.28
+WaypointNameBox.PlaceholderText = "Enter Waypoint Name..."
+WaypointNameBox.PlaceholderColor3 = Theme.TextSecondary
+WaypointNameBox.Text = ""
+WaypointNameBox.TextColor3 = Theme.Text
+WaypointNameBox.Font = Enum.Font.Gotham
+WaypointNameBox.TextSize = 11
+Instance.new("UICorner", WaypointNameBox).CornerRadius = UDim.new(0, 10)
+local wpBoxStroke = Instance.new("UIStroke", WaypointNameBox)
+wpBoxStroke.Color = Theme.White
+wpBoxStroke.Transparency = 0.50
+wpBoxStroke.Thickness = 1
+
+local CreateWaypointBtn = createButton("Create Waypoint Here", WaypointPage, Color3.fromRGB(210, 235, 255))
+
+local WaypointListFrame = Instance.new("ScrollingFrame", WaypointPage)
+WaypointListFrame.Size = UDim2.new(1, 0, 0, 140)
+WaypointListFrame.BackgroundTransparency = 1
+WaypointListFrame.ScrollBarThickness = 2
+
+local WaypointListLayout = Instance.new("UIListLayout", WaypointListFrame)
+WaypointListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+WaypointListLayout.Padding = UDim.new(0, 4)
+
+local function refreshWaypointList()
+	for _, child in pairs(WaypointListFrame:GetChildren()) do
+		if child:IsA("Frame") then child:Destroy() end
+	end
+	
+	for idx, wpData in ipairs(HubState.Waypoints) do
+		local row = Instance.new("Frame", WaypointListFrame)
+		row.Size = UDim2.new(1, 0, 0, 32)
+		row.BackgroundColor3 = Theme.Surface
+		row.BackgroundTransparency = 0.38
+		Instance.new("UICorner", row).CornerRadius = UDim.new(0, 8)
+		
+		local rowIcon = Instance.new("ImageLabel", row)
+		rowIcon.Size = UDim2.new(0, 16, 0, 16)
+		rowIcon.Position = UDim2.new(0, 8, 0.5, -8)
+		rowIcon.BackgroundTransparency = 1
+		rowIcon.Image = HubState.WaypointAssetId
+		rowIcon.ImageColor3 = wpData.Color
+		
+		local nameLabel = Instance.new("TextLabel", row)
+		nameLabel.Size = UDim2.new(0.52, -5, 1, 0)
+		nameLabel.Position = UDim2.new(0, 30, 0, 0)
+		nameLabel.BackgroundTransparency = 1
+		nameLabel.Text = wpData.Name
+		nameLabel.TextColor3 = Theme.Text
+		nameLabel.Font = Enum.Font.GothamBold
+		nameLabel.TextSize = 10
+		nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+		
+		local tpBtn = Instance.new("TextButton", row)
+		tpBtn.Size = UDim2.new(0.18, 0, 0.76, 0)
+		tpBtn.Position = UDim2.new(0.61, 0, 0.12, 0)
+		tpBtn.BackgroundColor3 = Theme.AccentSoft
+		tpBtn.Text = "TP"
+		tpBtn.TextColor3 = Theme.Text
+		tpBtn.Font = Enum.Font.GothamBold
+		tpBtn.TextSize = 10
+		Instance.new("UICorner", tpBtn).CornerRadius = UDim.new(0, 6)
+		
+		tpBtn.MouseButton1Click:Connect(function()
+			local char = LocalPlayer.Character
+			if char and char:FindFirstChild("HumanoidRootPart") then
+				char:PivotTo(CFrame.new(wpData.Position + Vector3.new(0, 3, 0)))
+				char.HumanoidRootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+				char.HumanoidRootPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+			end
+		end)
+		
+		local delBtn = Instance.new("TextButton", row)
+		delBtn.Size = UDim2.new(0.16, 0, 0.76, 0)
+		delBtn.Position = UDim2.new(0.81, 0, 0.12, 0)
+		delBtn.BackgroundColor3 = Theme.SurfacePressed
+		delBtn.Text = "X"
+		delBtn.TextColor3 = Theme.Text
+		delBtn.Font = Enum.Font.GothamBold
+		delBtn.TextSize = 10
+		Instance.new("UICorner", delBtn).CornerRadius = UDim.new(0, 6)
+		
+		delBtn.MouseButton1Click:Connect(function()
+			if wpData.Part then wpData.Part:Destroy() end
+			table.remove(HubState.Waypoints, idx)
+			refreshWaypointList()
+			saveWaypoints()
+		end)
+	end
+end
+
+local function spawnWaypointWorldUI(wpData)
+	local part = Instance.new("Part")
+	part.Name = "Waypoint_" .. wpData.Name
+	part.Size = Vector3.new(1, 1, 1)
+	part.Position = wpData.Position
+	part.Anchored = true; part.CanCollide = false; part.Transparency = 1
+	part.Parent = WaypointFolder
+	wpData.Part = part
+	
+	local bb = Instance.new("BillboardGui")
+	bb.Name = "Waypoint_BB"
+	bb.Adornee = part
+	bb.AlwaysOnTop = true
+	bb.Size = UDim2.new(0, 50, 0, 65)
+	bb.Parent = part
+	
+	local img = Instance.new("ImageLabel", bb)
+	img.Size = UDim2.new(0, 30, 0, 30)
+	img.Position = UDim2.new(0.5, -15, 0, 0)
+	img.BackgroundTransparency = 1
+	img.Image = HubState.WaypointAssetId
+	img.ImageColor3 = wpData.Color
+	img.ZIndex = 5 
+	
+	local label = Instance.new("TextLabel", bb)
+	label.Size = UDim2.new(1, 40, 0, 15)
+	label.Position = UDim2.new(0.5, -20, 0, 32)
+	label.BackgroundTransparency = 1
+	label.Text = wpData.Name
+	label.TextColor3 = Color3.fromRGB(30, 45, 60)
+	label.Font = Enum.Font.GothamBold
+	label.TextSize = 11
+	label.ZIndex = 4
+	
+	local distLabel = Instance.new("TextLabel", bb)
+	distLabel.Size = UDim2.new(1, 40, 0, 12)
+	distLabel.Position = UDim2.new(0.5, -20, 0, 47)
+	distLabel.BackgroundTransparency = 1
+	distLabel.Text = "0m"
+	distLabel.TextColor3 = Color3.fromRGB(80, 100, 120)
+	distLabel.Font = Enum.Font.Gotham
+	distLabel.TextSize = 10
+	distLabel.ZIndex = 4
+	
+	RunService.RenderStepped:Connect(function()
+		if not part or not part.Parent or not bb or not bb.Parent then return end
+		local camera = Workspace.CurrentCamera
+		if camera then
+			local dist = (camera.CFrame.Position - wpData.Position).Magnitude
+			distLabel.Text = math.floor(dist) .. "m"
+			local alpha = math.clamp((dist - 15) / 300, 0, 1)
+			local dynamicSize = math.floor(35 + (alpha * 35))
+			bb.Size = UDim2.new(0, dynamicSize, 0, dynamicSize + 15)
+			img.Size = UDim2.new(0, dynamicSize * 0.6, 0, dynamicSize * 0.6)
+			img.Position = UDim2.new(0.5, -(dynamicSize * 0.3), 0, 0)
+		end
+	end)
+end
+
+-- Rebuild all saved waypoint world markers after the UI helper is defined.
+for _, wpData in ipairs(HubState.Waypoints) do
+	spawnWaypointWorldUI(wpData)
+end
+refreshWaypointList()
+
+CreateWaypointBtn.MouseButton1Click:Connect(function()
+	local char = LocalPlayer.Character
+	if char and char:FindFirstChild("HumanoidRootPart") then
+		local pos = char.HumanoidRootPart.Position
+		local wpData = {
+			Name = (WaypointNameBox.Text ~= "") and WaypointNameBox.Text or ("Pin " .. (#HubState.Waypoints + 1)),
+			Position = pos,
+			Color = HubState.WaypointColor
+		}
+		table.insert(HubState.Waypoints, wpData)
+		spawnWaypointWorldUI(wpData)
+		refreshWaypointList()
+		saveWaypoints()
+		WaypointNameBox.Text = ""
+	end
+end)
+
+-- ==========================================
+-- ⚡ SECTION 3: SPEED ENGINE & TELEMETRY
+-- ==========================================
+createSectionHeader("Speed Engine", SpeedPage)
+local SpeedToggleBtn = createButton("Speed Engine: OFF", SpeedPage, Theme.Surface)
+local BreakVelToggleBtn = createButton("Break Velocity (Spoof): OFF", SpeedPage, Color3.fromRGB(210, 235, 255))
+local MatchBaseBtn = createButton("Match Base Speed Spoof: ON", SpeedPage, Color3.fromRGB(210, 235, 255))
+
+local DisplayFrame = Instance.new("Frame", SpeedPage)
+DisplayFrame.Size = UDim2.new(1, 0, 0, 110)
+DisplayFrame.BackgroundColor3 = Theme.Surface
+DisplayFrame.BackgroundTransparency = 0.42
+DisplayFrame.BorderSizePixel = 0
+local displayCorner = Instance.new("UICorner", DisplayFrame)
+displayCorner.CornerRadius = UDim.new(0, 13)
+local dispStroke = Instance.new("UIStroke", DisplayFrame)
+dispStroke.Color = Theme.White
+dispStroke.Transparency = 0.58
+dispStroke.Thickness = 1
+
+local ActualSpeedLabel = Instance.new("TextLabel", DisplayFrame)
+ActualSpeedLabel.Size = UDim2.new(1, -12, 0, 18)
+ActualSpeedLabel.Position = UDim2.new(0, 10, 0, 6)
+ActualSpeedLabel.BackgroundTransparency = 1
+ActualSpeedLabel.Text = "Real-Time WalkSpeed: 16"
+ActualSpeedLabel.TextColor3 = Theme.Accent
+ActualSpeedLabel.Font = Enum.Font.GothamBold
+ActualSpeedLabel.TextSize = 11
+ActualSpeedLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+local VelocityLabel = Instance.new("TextLabel", DisplayFrame)
+VelocityLabel.Size = UDim2.new(1, -12, 0, 18)
+VelocityLabel.Position = UDim2.new(0, 10, 0, 26)
+VelocityLabel.BackgroundTransparency = 1
+VelocityLabel.Text = "Physical Velocity: 0.00 studs/s"
+VelocityLabel.TextColor3 = Theme.TextSecondary
+VelocityLabel.Font = Enum.Font.GothamBold
+VelocityLabel.TextSize = 11
+VelocityLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+local SpoofedVelLabel = Instance.new("TextLabel", DisplayFrame)
+SpoofedVelLabel.Size = UDim2.new(1, -12, 0, 18)
+SpoofedVelLabel.Position = UDim2.new(0, 10, 0, 46)
+SpoofedVelLabel.BackgroundTransparency = 1
+SpoofedVelLabel.Text = "Spoofed Velocity (Server View): OFF"
+SpoofedVelLabel.TextColor3 = Theme.Accent
+SpoofedVelLabel.Font = Enum.Font.GothamBold
+SpoofedVelLabel.TextSize = 11
+SpoofedVelLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+local ServerSpeedLabel = Instance.new("TextLabel", DisplayFrame)
+ServerSpeedLabel.Size = UDim2.new(1, -12, 0, 18)
+ServerSpeedLabel.Position = UDim2.new(0, 10, 0, 66)
+ServerSpeedLabel.BackgroundTransparency = 1
+ServerSpeedLabel.Text = "Server View WalkSpeed: 16"
+ServerSpeedLabel.TextColor3 = Theme.TextSecondary
+ServerSpeedLabel.Font = Enum.Font.GothamBold
+ServerSpeedLabel.TextSize = 11
+ServerSpeedLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+local TargetSpeedLabel = Instance.new("TextLabel", DisplayFrame)
+TargetSpeedLabel.Size = UDim2.new(1, -12, 0, 18)
+TargetSpeedLabel.Position = UDim2.new(0, 10, 0, 86)
+TargetSpeedLabel.BackgroundTransparency = 1
+TargetSpeedLabel.Text = "Capped Target Speed: OFF"
+TargetSpeedLabel.TextColor3 = Theme.Accent
+TargetSpeedLabel.Font = Enum.Font.GothamBold
+TargetSpeedLabel.TextSize = 11
+TargetSpeedLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+createSectionHeader("Speed Values", SpeedPage)
+local AddedSpeedContainer = Instance.new("Frame", SpeedPage)
+AddedSpeedContainer.Size = UDim2.new(1, 0, 0, 36)
+AddedSpeedContainer.BackgroundTransparency = 1
+
+local AddedLabel = Instance.new("TextLabel", AddedSpeedContainer)
+AddedLabel.Size = UDim2.new(0.6, 0, 1, 0)
+AddedLabel.BackgroundTransparency = 1
+AddedLabel.Text = "Added Speed Value:"
+AddedLabel.TextColor3 = Color3.fromRGB(40, 55, 70)
+AddedLabel.Font = Enum.Font.GothamBold
+AddedLabel.TextSize = 11
+AddedLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+local AddedBox = Instance.new("TextBox", AddedSpeedContainer)
+AddedBox.Size = UDim2.new(0.38, 0, 1, 0)
+AddedBox.Position = UDim2.new(0.62, 0, 0, 0)
+AddedBox.BackgroundColor3 = Color3.fromRGB(235, 245, 255)
+AddedBox.BackgroundTransparency = 0.35
+AddedBox.Text = tostring(HubState.AddedSpeed)
+AddedBox.TextColor3 = Color3.fromRGB(30, 45, 60)
+AddedBox.Font = Enum.Font.GothamBold
+AddedBox.TextSize = 12
+Instance.new("UICorner", AddedBox).CornerRadius = UDim.new(0, 8)
+
+local CapContainer = Instance.new("Frame", SpeedPage)
+CapContainer.Size = UDim2.new(1, 0, 0, 36)
+CapContainer.BackgroundTransparency = 1
+
+local CapLabel = Instance.new("TextLabel", CapContainer)
+CapLabel.Size = UDim2.new(0.6, 0, 1, 0)
+CapLabel.BackgroundTransparency = 1
+CapLabel.Text = "Hard Speed Safety Cap:"
+CapLabel.TextColor3 = Color3.fromRGB(40, 55, 70)
+CapLabel.Font = Enum.Font.GothamBold
+CapLabel.TextSize = 11
+CapLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+local CapBox = Instance.new("TextBox", CapContainer)
+CapBox.Size = UDim2.new(0.38, 0, 1, 0)
+CapBox.Position = UDim2.new(0.62, 0, 0, 0)
+CapBox.BackgroundColor3 = Color3.fromRGB(235, 245, 255)
+CapBox.BackgroundTransparency = 0.35
+CapBox.Text = tostring(HubState.SpeedCap)
+CapBox.TextColor3 = Color3.fromRGB(30, 45, 60)
+CapBox.Font = Enum.Font.GothamBold
+CapBox.TextSize = 12
+Instance.new("UICorner", CapBox).CornerRadius = UDim.new(0, 8)
+
+local ApplySpeedBtn = createButton("Apply Speed Modifications", SpeedPage, Color3.fromRGB(210, 235, 255))
+
+local function applySpeedPhysics()
+	local char = LocalPlayer.Character
+	if not char then return end
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	if not hum then return end
+	
+	if HubState.SpeedEngineToggled then
+		local rawTarget = HubState.OriginalSpeed + HubState.AddedSpeed
+		local finalCappedSpeed = math.min(rawTarget, HubState.SpeedCap)
+		hum.WalkSpeed = finalCappedSpeed
+		TargetSpeedLabel.Text = "Capped Target Speed: " .. tostring(finalCappedSpeed)
+	else
+		hum.WalkSpeed = HubState.OriginalSpeed
+		TargetSpeedLabel.Text = "Capped Target Speed: OFF"
+	end
+end
+
+local function toggleSpeedEngine()
+	local char = LocalPlayer.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	
+	if not HubState.SpeedEngineToggled then
+		if hum then HubState.OriginalSpeed = hum.WalkSpeed end
+		HubState.SpeedEngineToggled = true
+	else
+		HubState.SpeedEngineToggled = false
+	end
+	
+	SpeedToggleBtn.Text = "Speed Engine: " .. (HubState.SpeedEngineToggled and "ON" or "OFF")
+	applySpeedPhysics()
+end
+
+SpeedToggleBtn.MouseButton1Click:Connect(toggleSpeedEngine)
+
+BreakVelToggleBtn.MouseButton1Click:Connect(function()
+	HubState.BreakVelocityToggled = not HubState.BreakVelocityToggled
+	BreakVelToggleBtn.Text = "Break Velocity (Spoof): " .. (HubState.BreakVelocityToggled and "ON" or "OFF")
+end)
+
+MatchBaseBtn.MouseButton1Click:Connect(function()
+	HubState.MatchBaseSpeedToggled = not HubState.MatchBaseSpeedToggled
+	MatchBaseBtn.Text = "Match Base Speed Spoof: " .. (HubState.MatchBaseSpeedToggled and "ON" or "OFF (Static 0)")
+end)
+
+ApplySpeedBtn.MouseButton1Click:Connect(function()
+	if not HubState.SpeedEngineToggled then return end
+	local newAdded = tonumber(AddedBox.Text)
+	local newCap = tonumber(CapBox.Text)
+	if newAdded then HubState.AddedSpeed = newAdded end
+	if newCap then HubState.SpeedCap = newCap end
+	applySpeedPhysics()
+end)
+
+-- 🛡️ Optional metatable hooks.
+-- Some mobile executors expose getrawmetatable/setreadonly but not the full
+-- hook stack. The GUI and normal WalkSpeed control must still work without it.
+local hasMetatableHooks =
+	type(getrawmetatable) == "function"
+	and type(setreadonly) == "function"
+	and type(newcclosure) == "function"
+	and type(checkcaller) == "function"
+
+if hasMetatableHooks then
+	local rawMTOk, rawMT = pcall(getrawmetatable, game)
+	if rawMTOk and rawMT then
+		local hookOk, hookError = pcall(function()
+			setreadonly(rawMT, false)
+			local oldIndex = rawMT.__index
+			local oldNewIndex = rawMT.__newindex
+
+			rawMT.__index = newcclosure(function(self, key)
+				if not checkcaller() then
+					if self:IsA("Humanoid") and key == "WalkSpeed" then
+						if HubState.SpeedEngineToggled then return HubState.OriginalSpeed end
+					elseif (key == "AssemblyLinearVelocity" or key == "Velocity") and self:IsA("BasePart") then
+						if HubState.BreakVelocityToggled then
+							if HubState.MatchBaseSpeedToggled then
+								local realVel = oldIndex(self, key)
+								if realVel.Magnitude > 0.1 then
+									return realVel.Unit * math.min(realVel.Magnitude, HubState.OriginalSpeed)
+								else
+									return Vector3.new(0, 0, 0)
+								end
+							else
+								return Vector3.new(0, 0, 0)
+							end
+						end
+					end
+				end
+				return oldIndex(self, key)
+			end)
+
+			rawMT.__newindex = newcclosure(function(self, key, value)
+				if not checkcaller() and self:IsA("Humanoid") and key == "WalkSpeed" then
+					HubState.OriginalSpeed = value
+					if HubState.SpeedEngineToggled then
+						local capped = math.min(value + HubState.AddedSpeed, HubState.SpeedCap)
+						return oldNewIndex(self, key, capped)
+					end
+				end
+				return oldNewIndex(self, key, value)
+			end)
+			setreadonly(rawMT, true)
+		end)
+
+		if not hookOk then
+			pcall(function() setreadonly(rawMT, true) end)
+			warn("Gemini Hub: Speed spoof hooks could not be installed: " .. tostring(hookError))
+		end
+	else
+		warn("Gemini Hub: getrawmetatable(game) is unavailable; using normal speed controls only.")
+	end
+else
+	warn("Gemini Hub: Advanced speed spoof hooks are unavailable in this executor; using normal speed controls only.")
+end
+
+-- ==========================================
+-- 🌌 SECTION 4: OTHERS TAB
+-- ==========================================
+createSectionHeader("Player", OthersPage)
+local ResetPlayerBtn = createButton("Reset Character", OthersPage, Theme.Surface)
+ResetPlayerBtn.MouseButton1Click:Connect(function()
+	local char = LocalPlayer.Character
+	if not char then return end
+
+	local humanoid = char:FindFirstChildOfClass("Humanoid")
+	local resetOk = false
+
+	if humanoid then
+		resetOk = pcall(function()
+			humanoid.Health = 0
+		end)
+	end
+
+	if not resetOk then
+		pcall(function()
+			char:BreakJoints()
+		end)
+	end
+end)
+
+createSectionHeader("Lighting", OthersPage)
+local LightToggleBtn = createButton("Infinite Yield Light: OFF", OthersPage, Theme.Surface)
+
+createSlider("Light Range", HubState.LightRange, 4, 64, OthersPage, function(val)
+	HubState.LightRange = val
+	local char = LocalPlayer.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	local pointLight = root and root:FindFirstChild("GeminiHub_PlayerLight")
+	if pointLight then pointLight.Range = val end
+end)
+
+createSlider("Light Brightness", HubState.LightBrightness, 0.1, 10, OthersPage, function(val)
+	HubState.LightBrightness = val
+	local char = LocalPlayer.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	local pointLight = root and root:FindFirstChild("GeminiHub_PlayerLight")
+	if pointLight then pointLight.Brightness = val end
+end)
+
+create2DColorPicker("Light Color", HubState.LightColor, OthersPage, function(newColor)
+	HubState.LightColor = newColor
+	local char = LocalPlayer.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	local pointLight = root and root:FindFirstChild("GeminiHub_PlayerLight")
+	if pointLight then pointLight.Color = newColor end
+end)
+
+local ShadowToggleBtn = createButton("Cast Shadows: OFF", OthersPage, Color3.fromRGB(210, 235, 255))
+ShadowToggleBtn.MouseButton1Click:Connect(function()
+	HubState.LightShadows = not HubState.LightShadows
+	ShadowToggleBtn.Text = "Cast Shadows: " .. (HubState.LightShadows and "ON" or "OFF")
+	local char = LocalPlayer.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	local pointLight = root and root:FindFirstChild("GeminiHub_PlayerLight")
+	if pointLight then pointLight.Shadows = HubState.LightShadows end
+end)
+
+local function updatePlayerLight()
+	local char = LocalPlayer.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not root then return end
+
+	local existingLight = root:FindFirstChild("GeminiHub_PlayerLight")
+	if existingLight then existingLight:Destroy() end
+
+	if HubState.LightToggled then
+		local pl = Instance.new("PointLight")
+		pl.Name = "GeminiHub_PlayerLight"
+		pl.Range = HubState.LightRange
+		pl.Brightness = HubState.LightBrightness
+		pl.Color = HubState.LightColor
+		pl.Shadows = HubState.LightShadows
+		pl.Parent = root
+	end
+end
+
+LightToggleBtn.MouseButton1Click:Connect(function()
+	HubState.LightToggled = not HubState.LightToggled
+	LightToggleBtn.Text = "Infinite Yield Light: " .. (HubState.LightToggled and "ON" or "OFF")
+	updatePlayerLight()
+end)
+
+createSectionHeader("Environment", OthersPage)
+local TimeOverrideBtn = createButton("Override Time of Day: OFF", OthersPage, Theme.Surface)
+local timeLoopConnection
+
+createSlider("Daytime Slider", HubState.DaytimeValue, 0, 24, OthersPage, function(val)
+	HubState.DaytimeValue = val
+end)
+
+TimeOverrideBtn.MouseButton1Click:Connect(function()
+	HubState.DaytimeToggled = not HubState.DaytimeToggled
+	TimeOverrideBtn.Text = "Override Time of Day: " .. (HubState.DaytimeToggled and "ON" or "OFF")
+	
+	if HubState.DaytimeToggled then
+		timeLoopConnection = RunService.RenderStepped:Connect(function()
+			game.Lighting.ClockTime = HubState.DaytimeValue
+		end)
+	else
+		if timeLoopConnection then 
+			timeLoopConnection:Disconnect() 
+			timeLoopConnection = nil
+		end
+	end
+end)
+
+createSlider("Tactical FOV", 70, 70, 120, OthersPage, function(val)
+	Workspace.CurrentCamera.FieldOfView = val
+end)
+
+local HoverToggleBtn = createButton("Hover Name ESP: OFF", OthersPage, Color3.fromRGB(210, 235, 255))
+local PlayerMouse = LocalPlayer:GetMouse()
+
+-- Hover Name ESP supports both desktop mouse targeting and mobile touch targeting.
+-- On touch devices, the last world touch is converted into a camera ray.
+local LastTouchPosition = nil
+local HoverRaycastParams = RaycastParams.new()
+HoverRaycastParams.FilterType = Enum.RaycastFilterType.Exclude
+HoverRaycastParams.IgnoreWater = true
+
+local function isTouchOverHub(position)
+	local ok, objects = pcall(function()
+		return GuiService:GetGuiObjectsAtPosition(position.X, position.Y)
+	end)
+	if not ok or type(objects) ~= "table" then
+		return false
+	end
+
+	for _, guiObject in ipairs(objects) do
+		if guiObject == ScreenGui or guiObject:IsDescendantOf(ScreenGui) then
+			return true
+		end
+	end
+
+	return false
+end
+
+UserInputService.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.Touch then
+		if not isTouchOverHub(input.Position) then
+			LastTouchPosition = input.Position
+		end
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.Touch then
+		if not isTouchOverHub(input.Position) then
+			LastTouchPosition = input.Position
+		end
+	end
+end)
+
+-- Hover Name ESP uses the same lightweight SelectionBox-style outline approach
+-- used by Infinite Yield's hovername ESP instead of a Highlight instance.
+local oldHoverOutline = safeParent:FindFirstChild("Gemini_Hover_Outline")
+if oldHoverOutline then oldHoverOutline:Destroy() end
+
+local oldHoverName = safeParent:FindFirstChild("Gemini_Hover_Name")
+if oldHoverName then oldHoverName:Destroy() end
+
+local HoverOutline = Instance.new("SelectionBox")
+HoverOutline.Name = "Gemini_Hover_Outline"
+HoverOutline.Color3 = Color3.fromRGB(255, 255, 255)
+HoverOutline.SurfaceColor3 = Color3.fromRGB(255, 255, 255)
+HoverOutline.SurfaceTransparency = 1
+HoverOutline.Transparency = 0
+HoverOutline.LineThickness = 0.03
+HoverOutline.Adornee = nil
+HoverOutline.Parent = safeParent
+
+local HoverBB = Instance.new("BillboardGui")
+HoverBB.Name = "Gemini_Hover_Name"
+HoverBB.Size = UDim2.new(0, 140, 0, 24)
+HoverBB.StudsOffset = Vector3.new(0, 3.5, 0)
+HoverBB.AlwaysOnTop = true
+
+local HoverText = Instance.new("TextLabel", HoverBB)
+HoverText.Size = UDim2.new(1, 0, 1, 0)
+HoverText.BackgroundTransparency = 1
+HoverText.TextColor3 = Color3.fromRGB(255, 255, 255)
+HoverText.Font = Enum.Font.GothamBold
+HoverText.TextSize = 14
+HoverText.TextStrokeTransparency = 0.35
+HoverText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+HoverText.TextXAlignment = Enum.TextXAlignment.Center
+
+local function getHoverTarget()
+	if not isTouchDevice then
+		return PlayerMouse.Target
+	end
+
+	local camera = Workspace.CurrentCamera
+	if not camera or not LastTouchPosition then
+		return nil
+	end
+
+	local character = LocalPlayer.Character
+	HoverRaycastParams.FilterDescendantsInstances = character and {character} or {}
+
+	local ok, ray = pcall(function()
+		return camera:ScreenPointToRay(LastTouchPosition.X, LastTouchPosition.Y)
+	end)
+	if not ok or not ray then
+		return nil
+	end
+
+	local result = Workspace:Raycast(ray.Origin, ray.Direction * 1000, HoverRaycastParams)
+	return result and result.Instance or nil
+end
+
+local function findHumanoidModel(instance)
+	local current = instance
+	while current and current ~= Workspace do
+		if current:IsA("Model") and current:FindFirstChildOfClass("Humanoid") then
+			return current
+		end
+		current = current.Parent
+	end
+	return nil
+end
+
+HoverToggleBtn.MouseButton1Click:Connect(function()
+	HubState.HoverToggled = not HubState.HoverToggled
+	HoverToggleBtn.Text = "Hover Name ESP: " .. (HubState.HoverToggled and "ON" or "OFF")
+
+	if not HubState.HoverToggled then
+		HoverOutline.Adornee = nil
+		HoverBB.Parent = nil
+	end
+end)
+
+RunService.RenderStepped:Connect(function()
+	if HubState.HoverToggled then
+		local target = getHoverTarget()
+		local model = target and findHumanoidModel(target)
+
+		if target and model then
+			HoverOutline.Adornee = target
+			HoverBB.Parent = model:FindFirstChild("Head") or model:FindFirstChild("HumanoidRootPart")
+			HoverText.Text = model.Name
+		else
+			HoverOutline.Adornee = nil
+			HoverBB.Parent = nil
+		end
+	end
+end)
+
+LocalPlayer.CharacterAdded:Connect(function(newChar)
+	task.spawn(function()
+		newChar:WaitForChild("HumanoidRootPart", 5)
+		if HubState.LightToggled then updatePlayerLight() end
+		if HubState.SpeedEngineToggled then applySpeedPhysics() end
+	end)
+end)
+
+-- ==========================================
+-- ⚙️ SECTION 5: SETTINGS & SECURE KEYBINDS
+-- ==========================================
+createSectionHeader("Keybinds", SettingsPage)
+
+local KeybindContainer = Instance.new("Frame", SettingsPage)
+KeybindContainer.Size = UDim2.new(1, 0, 0, isTouchDevice and 54 or 36)
+KeybindContainer.BackgroundTransparency = 1
+
+local KeybindText = Instance.new("TextLabel", KeybindContainer)
+KeybindText.Size = UDim2.new(isTouchDevice and 1 or 0.6, 0, 1, 0)
+KeybindText.BackgroundTransparency = 1
+KeybindText.Text = isTouchDevice and "Speed Toggle:" or "Speed Toggle Keybind:"
+KeybindText.TextColor3 = Theme.Text
+KeybindText.Font = Enum.Font.GothamBold
+KeybindText.TextSize = 11
+KeybindText.TextXAlignment = Enum.TextXAlignment.Left
+
+local KeybindBtn = Instance.new("TextButton", KeybindContainer)
+KeybindBtn.Size = UDim2.new(0.38, 0, 1, 0)
+KeybindBtn.Position = UDim2.new(0.62, 0, 0, 0)
+KeybindBtn.BackgroundColor3 = Theme.Surface
+KeybindBtn.BackgroundTransparency = 0.28
+KeybindBtn.BorderSizePixel = 0
+KeybindBtn.Text = isTouchDevice and "Use Speed Tab" or HubState.ToggleKeybind.Name
+KeybindBtn.TextColor3 = Theme.Text
+KeybindBtn.Font = Enum.Font.GothamBold
+KeybindBtn.TextSize = 11
+KeybindBtn.Visible = not isTouchDevice
+Instance.new("UICorner", KeybindBtn).CornerRadius = UDim.new(0, 8)
+
+if isTouchDevice then
+	local MobileSpeedHint = Instance.new("TextLabel", KeybindContainer)
+	MobileSpeedHint.Size = UDim2.new(1, 0, 0, 18)
+	MobileSpeedHint.Position = UDim2.new(0, 0, 0, 30)
+	MobileSpeedHint.BackgroundTransparency = 1
+	MobileSpeedHint.Text = "Tap the Speed Engine button to toggle it."
+	MobileSpeedHint.TextColor3 = Theme.TextSecondary
+	MobileSpeedHint.Font = Enum.Font.Gotham
+	MobileSpeedHint.TextSize = 9.5
+	MobileSpeedHint.TextXAlignment = Enum.TextXAlignment.Left
+else
+	KeybindBtn.MouseButton1Click:Connect(function()
+		HubState.IsRebinding = true
+		KeybindBtn.Text = "...Press Any Key..."
+	end)
+
+	GeminiEnv.GeminiKeybindConn = UserInputService.InputBegan:Connect(function(input, gpe)
+		if HubState.IsRebinding then
+			if input.UserInputType == Enum.UserInputType.Keyboard then
+				HubState.ToggleKeybind = input.KeyCode
+				KeybindBtn.Text = input.KeyCode.Name
+				HubState.IsRebinding = false
+			end
+		elseif not gpe and input.UserInputType == Enum.UserInputType.Keyboard then
+			if input.KeyCode == HubState.ToggleKeybind then
+				local now = tick()
+				if now - HubState.LastToggleTick > 0.2 then
+					HubState.LastToggleTick = now
+					toggleSpeedEngine()
+				end
+			end
+		end
+	end)
+end
+
+createSectionHeader("Maintenance", SettingsPage)
+local PurgeBtn = createButton("Reset & Purge All ESP Instances", SettingsPage, Theme.Surface)
+PurgeBtn.MouseButton1Click:Connect(function()
+	for _, v in pairs(Workspace:GetDescendants()) do
+		if v:IsA("Highlight") and (v.Name == "NPC_HIGHLIGHT" or v.Name == "PLAYER_HIGHLIGHT" or v.Name == "Gemini_Hover_HL") then v:Destroy() end
+		if v:IsA("SelectionBox") and v.Name == "Gemini_Hover_Outline" then v:Destroy() end
+		if v:IsA("BillboardGui") and (string.find(v.Name, "NPC_HEALTH_BAR") or string.find(v.Name, "PLAYER_HEALTH_BAR") or v.Name == "Gemini_Hover_Name") then v:Destroy() end
+	end
+	print("All ESP Instances Successfully Purged!")
+end)
+
+-- Global Render Loop Monitor
+RunService.Stepped:Connect(function()
+	local char = LocalPlayer.Character
+	if char then
+		local hum = char:FindFirstChildOfClass("Humanoid")
+		local root = char:FindFirstChild("HumanoidRootPart")
+		
+		if hum then
+			ActualSpeedLabel.Text = "Real-Time WalkSpeed: " .. tostring(math.floor(hum.WalkSpeed * 10) / 10)
+			if HubState.SpeedEngineToggled then
+				local target = math.min(HubState.OriginalSpeed + HubState.AddedSpeed, HubState.SpeedCap)
+				if hum.WalkSpeed ~= target then hum.WalkSpeed = target end
+			end
+		end
+		
+		if root then
+			local realVel = root.AssemblyLinearVelocity.Magnitude
+			VelocityLabel.Text = string.format("Physical Velocity: %.2f studs/s", realVel)
+			
+			if HubState.BreakVelocityToggled then
+				if HubState.MatchBaseSpeedToggled then
+					local spoofedMag = math.min(realVel, HubState.OriginalSpeed)
+					SpoofedVelLabel.Text = string.format("Spoofed Vel: %.2f studs/s (Base Matched)", spoofedMag)
+				else
+					SpoofedVelLabel.Text = "Spoofed Vel: 0.00 studs/s (Static Zero)"
+				end
+			else
+				SpoofedVelLabel.Text = "Spoofed Velocity (Server View): OFF"
+			end
+		else
+			VelocityLabel.Text = "Physical Velocity: 0.00 studs/s"
+			SpoofedVelLabel.Text = "Spoofed Velocity (Server View): OFF"
+		end
+		
+		ServerSpeedLabel.Text = "Server View WalkSpeed: " .. tostring(HubState.OriginalSpeed)
+	end
+end)
+
+print("💎 Gemini Hub V13 Delta Mobile Active: Liquid Glass UI • Touch Hover ESP • Safe Executor Hooks ❄️💎")
