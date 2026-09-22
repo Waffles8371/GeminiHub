@@ -1,4 +1,4 @@
--- 💎 GEMINI HUB V12 - LIQUID GLASS + HOVER OUTLINE UPDATE 💎
+-- 💎 GEMINI HUB V14 - LIQUID GLASS + ESP + PLAYER WARNING UPDATE 💎
 -- Root Cause Fixed: Restored full-spectrum rainbow pickers & shifted theme balance toward aquatic blue with green sliders! 💧🌈🌿
 
 local Players = game:GetService("Players")
@@ -71,7 +71,9 @@ local HubState = {
 	SpeedCap = 25,                  
 	OriginalSpeed = 16,             
 	ToggleKeybind = Enum.KeyCode.G,
+	OpenMenuKeybind = Enum.KeyCode.K,
 	IsRebinding = false,
+	IsRebindingOpenMenu = false,
 	LastToggleTick = 0,
 
 	-- 💡 Others / Light Engine State
@@ -86,6 +88,7 @@ local HubState = {
 	DaytimeValue = 12,
 	FOVToggled = false,
 	HoverToggled = false,
+	PlayerWarnings = {},
 }
 
 -- ==========================================
@@ -262,6 +265,96 @@ local function loadWaypoints()
 	return false
 end
 
+-- ==========================================
+-- ⚠️ PLAYER WARNING PERSISTENCE
+-- ==========================================
+-- Like waypoints, warnings are stored locally through the executor filesystem
+-- when available, with a same-session getgenv fallback.
+local WarningSaveFolder = "GeminiHub"
+local WarningSaveFile = WarningSaveFolder .. "/PlayerWarnings.json"
+local WarningPersistenceMode = "Unavailable"
+
+local function serializeWarnings()
+	local payload = { Version = 1, Players = {} }
+	for _, name in ipairs(HubState.PlayerWarnings) do
+		if type(name) == "string" and name ~= "" then
+			table.insert(payload.Players, name)
+		end
+	end
+	return payload
+end
+
+local function deserializeWarnings(payload)
+	if type(payload) ~= "table" or type(payload.Players) ~= "table" then
+		return false
+	end
+	local restored, seen = {}, {}
+	for _, name in ipairs(payload.Players) do
+		if type(name) == "string" and name ~= "" and not seen[string.lower(name)] then
+			seen[string.lower(name)] = true
+			table.insert(restored, name)
+		end
+	end
+	HubState.PlayerWarnings = restored
+	return true
+end
+
+local function savePlayerWarnings()
+	local payload = serializeWarnings()
+	local cacheUpdated = pcall(function()
+		getgenv().GeminiHubPlayerWarningCache = payload
+	end)
+
+	if type(writefile) == "function" and type(readfile) == "function" then
+		ensureWaypointSaveFolder()
+		local encodedOk, encoded = pcall(function()
+			return HttpService:JSONEncode(payload)
+		end)
+		if encodedOk and type(encoded) == "string" then
+			local writeOk = pcall(function()
+				writefile(WarningSaveFile, encoded)
+			end)
+			if writeOk then
+				WarningPersistenceMode = "Filesystem"
+				return true
+			end
+		end
+	end
+
+	WarningPersistenceMode = cacheUpdated and "Session Cache" or "Unavailable"
+	return cacheUpdated
+end
+
+local function loadPlayerWarnings()
+	if type(readfile) == "function" and waypointFileExists(WarningSaveFile) then
+		local readOk, raw = pcall(function()
+			return readfile(WarningSaveFile)
+		end)
+		if readOk and type(raw) == "string" and #raw > 0 then
+			local decodeOk, payload = pcall(function()
+				return HttpService:JSONDecode(raw)
+			end)
+			if decodeOk and deserializeWarnings(payload) then
+				WarningPersistenceMode = "Filesystem"
+				return true
+			end
+		end
+	end
+
+	local cacheOk, cachedPayload = pcall(function()
+		return getgenv().GeminiHubPlayerWarningCache
+	end)
+	if cacheOk and cachedPayload and deserializeWarnings(cachedPayload) then
+		WarningPersistenceMode = "Session Cache"
+		return true
+	end
+
+	WarningPersistenceMode = type(readfile) == "function" and "Filesystem Ready" or "Unavailable"
+	return false
+end
+
+loadPlayerWarnings()
+
 -- 🧊 Main Window Frame / Liquid Glass UI
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "GeminiHub"
@@ -273,7 +366,7 @@ end)
 ScreenGui.Parent = safeParent
 
 -- ==========================================
--- 💎 GEMINI HUB 12.0 - LIQUID GLASS THEME
+-- 💎 GEMINI HUB 14.0 - LIQUID GLASS THEME
 -- ==========================================
 
 local Theme = {
@@ -522,7 +615,7 @@ local Version = Instance.new("TextLabel")
 Version.Size = UDim2.new(1, -80, 0, 16)
 Version.Position = UDim2.new(0, 20, 0, 31)
 Version.BackgroundTransparency = 1
-Version.Text = "v13"
+Version.Text = "v14"
 Version.TextColor3 = Theme.TextSecondary
 Version.Font = Enum.Font.Gotham
 Version.TextSize = 10
@@ -670,6 +763,135 @@ UserInputService.InputChanged:Connect(function(input)
 end)
 
 -- ==========================================
+-- 🔔 REUSABLE LIQUID GLASS NOTIFICATION SYSTEM
+-- ==========================================
+local NotificationContainer = Instance.new("Frame")
+NotificationContainer.Name = "NotificationContainer"
+NotificationContainer.AnchorPoint = Vector2.new(0.5, 0)
+NotificationContainer.Size = UDim2.new(0, 300, 0, 0)
+NotificationContainer.AutomaticSize = Enum.AutomaticSize.Y
+NotificationContainer.BackgroundTransparency = 1
+NotificationContainer.BorderSizePixel = 0
+NotificationContainer.ZIndex = 50
+NotificationContainer.Parent = ScreenGui
+
+local NotificationLayout = Instance.new("UIListLayout")
+NotificationLayout.FillDirection = Enum.FillDirection.Vertical
+NotificationLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+NotificationLayout.SortOrder = Enum.SortOrder.LayoutOrder
+NotificationLayout.Padding = UDim.new(0, 7)
+NotificationLayout.Parent = NotificationContainer
+
+local function updateNotificationPosition()
+	local pos = MainFrame.AbsolutePosition
+	local size = MainFrame.AbsoluteSize
+	NotificationContainer.Position = UDim2.fromOffset(pos.X + (size.X / 2), pos.Y + size.Y + 9)
+end
+
+MainFrame:GetPropertyChangedSignal("Position"):Connect(updateNotificationPosition)
+MainFrame:GetPropertyChangedSignal("Size"):Connect(updateNotificationPosition)
+MainFrame:GetPropertyChangedSignal("AbsolutePosition"):Connect(updateNotificationPosition)
+MainFrame:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateNotificationPosition)
+updateNotificationPosition()
+
+local function showNotification(titleText, messageText, duration)
+	duration = duration or 3.5
+
+	local card = Instance.new("Frame")
+	card.Name = "Notification"
+	card.Size = UDim2.new(1, 0, 0, 58)
+	card.BackgroundColor3 = Color3.fromRGB(225, 255, 238)
+	card.BackgroundTransparency = 0.18
+	card.BorderSizePixel = 0
+	card.ClipsDescendants = true
+	card.ZIndex = 51
+	card.Parent = NotificationContainer
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 15)
+	corner.Parent = card
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(175, 255, 205)
+	stroke.Transparency = 0.25
+	stroke.Thickness = 1
+	stroke.Parent = card
+
+	local gradient = Instance.new("UIGradient")
+	gradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(240, 255, 246)),
+		ColorSequenceKeypoint.new(0.62, Color3.fromRGB(220, 250, 232)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(120, 215, 155)),
+	})
+	gradient.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.05),
+		NumberSequenceKeypoint.new(0.65, 0.10),
+		NumberSequenceKeypoint.new(1, 0.32),
+	})
+	gradient.Rotation = 90
+	gradient.Parent = card
+
+	local accent = Instance.new("Frame")
+	accent.Size = UDim2.new(0, 4, 1, -16)
+	accent.Position = UDim2.new(0, 7, 0, 8)
+	accent.BackgroundColor3 = Color3.fromRGB(60, 190, 105)
+	accent.BorderSizePixel = 0
+	accent.ZIndex = 52
+	accent.Parent = card
+	Instance.new("UICorner", accent).CornerRadius = UDim.new(1, 0)
+
+	local title = Instance.new("TextLabel")
+	title.Size = UDim2.new(1, -28, 0, 19)
+	title.Position = UDim2.new(0, 19, 0, 7)
+	title.BackgroundTransparency = 1
+	title.Text = titleText
+	title.TextColor3 = Color3.fromRGB(28, 90, 55)
+	title.Font = Enum.Font.GothamBold
+	title.TextSize = 11
+	title.TextXAlignment = Enum.TextXAlignment.Left
+	title.ZIndex = 52
+	title.Parent = card
+
+	local message = Instance.new("TextLabel")
+	message.Size = UDim2.new(1, -28, 0, 23)
+	message.Position = UDim2.new(0, 19, 0, 27)
+	message.BackgroundTransparency = 1
+	message.Text = messageText
+	message.TextColor3 = Color3.fromRGB(55, 105, 75)
+	message.Font = Enum.Font.GothamMedium
+	message.TextSize = 9.5
+	message.TextXAlignment = Enum.TextXAlignment.Left
+	message.TextTruncate = Enum.TextTruncate.AtEnd
+	message.ZIndex = 52
+	message.Parent = card
+
+	card.BackgroundTransparency = 1
+	stroke.Transparency = 1
+	accent.BackgroundTransparency = 1
+	title.TextTransparency = 1
+	message.TextTransparency = 1
+
+	TweenService:Create(card, TweenSoft, {BackgroundTransparency = 0.18}):Play()
+	TweenService:Create(stroke, TweenSoft, {Transparency = 0.25}):Play()
+	TweenService:Create(accent, TweenSoft, {BackgroundTransparency = 0}):Play()
+	TweenService:Create(title, TweenSoft, {TextTransparency = 0}):Play()
+	TweenService:Create(message, TweenSoft, {TextTransparency = 0}):Play()
+
+	task.delay(duration, function()
+		if not card.Parent then return end
+		TweenService:Create(card, TweenSoft, {BackgroundTransparency = 1}):Play()
+		TweenService:Create(stroke, TweenSoft, {Transparency = 1}):Play()
+		TweenService:Create(accent, TweenSoft, {BackgroundTransparency = 1}):Play()
+		TweenService:Create(title, TweenSoft, {TextTransparency = 1}):Play()
+		TweenService:Create(message, TweenSoft, {TextTransparency = 1}):Play()
+		task.wait(TweenSoft.Time)
+		if card then card:Destroy() end
+	end)
+end
+
+getgenv().GeminiHubNotify = showNotification
+
+-- ==========================================
 -- 🏷️ LIQUID GLASS TAB STRIP
 -- ==========================================
 
@@ -710,35 +932,93 @@ TabListLayout.Parent = TabBar
 local Containers = {}
 local ActiveTabName = "ESP"
 
+-- Moving liquid-glass pill. It lives on a separate layer so the TabBar's
+-- UIListLayout never tries to lay the indicator out as another tab.
+local TabIndicatorLayer = Instance.new("Frame")
+TabIndicatorLayer.Name = "TabIndicatorLayer"
+TabIndicatorLayer.Size = TabBar.Size
+TabIndicatorLayer.Position = TabBar.Position
+TabIndicatorLayer.BackgroundTransparency = 1
+TabIndicatorLayer.BorderSizePixel = 0
+TabIndicatorLayer.ZIndex = 4
+TabIndicatorLayer.Parent = MainFrame
+
+local TabIndicator = Instance.new("Frame")
+TabIndicator.Name = "ActiveTabPill"
+TabIndicator.Size = UDim2.new(1/6, -4, 0, 32)
+TabIndicator.Position = UDim2.new(0, 5, 0, 4)
+TabIndicator.BackgroundColor3 = Theme.White
+TabIndicator.BackgroundTransparency = 0.48
+TabIndicator.BorderSizePixel = 0
+TabIndicator.ZIndex = 4
+TabIndicator.Parent = TabIndicatorLayer
+
+local TabIndicatorCorner = Instance.new("UICorner")
+TabIndicatorCorner.CornerRadius = UDim.new(0, 11)
+TabIndicatorCorner.Parent = TabIndicator
+
+local TabIndicatorStroke = Instance.new("UIStroke")
+TabIndicatorStroke.Color = Theme.White
+TabIndicatorStroke.Transparency = 0.28
+TabIndicatorStroke.Thickness = 1
+TabIndicatorStroke.Parent = TabIndicator
+
+local TabIndicatorGradient = Instance.new("UIGradient")
+TabIndicatorGradient.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Theme.AccentSoft),
+	ColorSequenceKeypoint.new(0.55, Theme.White),
+	ColorSequenceKeypoint.new(1, Theme.AccentSoft),
+})
+TabIndicatorGradient.Transparency = NumberSequence.new({
+	NumberSequenceKeypoint.new(0, 0.15),
+	NumberSequenceKeypoint.new(0.55, 0.02),
+	NumberSequenceKeypoint.new(1, 0.15),
+})
+TabIndicatorGradient.Rotation = 90
+TabIndicatorGradient.Parent = TabIndicator
+
+local function moveTabIndicator(btn, instant)
+	task.defer(function()
+		if not btn or not btn.Parent then return end
+		local targetSize = btn.Size
+		local targetPosition = btn.Position
+		if instant then
+			TabIndicator.Size = targetSize
+			TabIndicator.Position = targetPosition
+		else
+			TweenService:Create(TabIndicator, TweenSoft, {
+				Size = targetSize,
+				Position = targetPosition,
+			}):Play()
+		end
+	end)
+end
+
 local function setTabVisual(btn, active, instant)
-	local targetBackground = active and 0.20 or 0.88
+	local targetBackground = active and 1 or 0.88
 	local targetText = active and Theme.Accent or Theme.TextSecondary
 
 	if instant then
 		btn.BackgroundTransparency = targetBackground
 		btn.TextColor3 = targetText
 	else
-		TweenService:Create(
-			btn,
-			TweenFast,
-			{
-				BackgroundTransparency = targetBackground,
-				TextColor3 = targetText,
-			}
-		):Play()
+		TweenService:Create(btn, TweenFast, {
+			BackgroundTransparency = targetBackground,
+			TextColor3 = targetText,
+		}):Play()
 	end
 
 	local stroke = btn:FindFirstChild("TabStroke")
 	if stroke then
 		if instant then
-			stroke.Transparency = active and 0.32 or 1
+			stroke.Transparency = active and 0.55 or 1
 		else
-			TweenService:Create(
-				stroke,
-				TweenFast,
-				{Transparency = active and 0.32 or 1}
-			):Play()
+			TweenService:Create(stroke, TweenFast, {Transparency = active and 0.55 or 1}):Play()
 		end
+	end
+
+	if active then
+		moveTabIndicator(btn, instant)
 	end
 end
 
@@ -755,7 +1035,7 @@ end
 local function createTab(name, _pastelBaseColor)
 	local btn = Instance.new("TextButton")
 	btn.Name = name .. "Tab"
-	btn.Size = UDim2.new(0.2, -4, 0, 32)
+	btn.Size = UDim2.new(1/6, -4, 0, 32)
 	btn.BackgroundColor3 = Theme.White
 	btn.BackgroundTransparency = 0.88
 	btn.BorderSizePixel = 0
@@ -832,15 +1112,28 @@ local function createTab(name, _pastelBaseColor)
 
 	btn.MouseLeave:Connect(function()
 		if ActiveTabName ~= name then
-			TweenService:Create(
-				btn,
-				TweenFast,
-				{
-					BackgroundTransparency = 0.88,
-					TextColor3 = Theme.TextSecondary,
-				}
-			):Play()
+			TweenService:Create(btn, TweenFast, {
+				BackgroundTransparency = 0.88,
+				TextColor3 = Theme.TextSecondary,
+			}):Play()
 		end
+	end)
+
+	btn.MouseButton1Down:Connect(function()
+		TweenService:Create(btn, TweenFast, {
+			BackgroundTransparency = 0.58,
+			TextColor3 = Theme.Accent,
+		}):Play()
+		TweenService:Create(TabIndicator, TweenFast, {BackgroundTransparency = 0.32}):Play()
+	end)
+
+	btn.MouseButton1Up:Connect(function()
+		if ActiveTabName == name then
+			TweenService:Create(btn, TweenFast, {BackgroundTransparency = 1}):Play()
+		else
+			TweenService:Create(btn, TweenFast, {BackgroundTransparency = 0.88}):Play()
+		end
+		TweenService:Create(TabIndicator, TweenFast, {BackgroundTransparency = 0.48}):Play()
 	end)
 
 	return page
@@ -907,6 +1200,10 @@ local function createButton(text, parent, _pastelColor)
 	local corner = Instance.new("UICorner")
 	corner.CornerRadius = UDim.new(0, 12)
 	corner.Parent = btn
+
+	local buttonScale = Instance.new("UIScale")
+	buttonScale.Scale = 1
+	buttonScale.Parent = btn
 
 	local padding = Instance.new("UIPadding")
 	padding.PaddingLeft = UDim.new(0, 14)
@@ -1005,26 +1302,29 @@ local function createButton(text, parent, _pastelColor)
 		):Play()
 	end)
 
-	btn.MouseButton1Down:Connect(function()
-		TweenService:Create(
-			btn,
-			TweenFast,
-			{
-				BackgroundTransparency = 0.08,
-				BackgroundColor3 = Theme.SurfacePressed,
-			}
-		):Play()
-	end)
+	local function pressButton()
+		TweenService:Create(btn, TweenFast, {
+			BackgroundTransparency = 0.08,
+			BackgroundColor3 = Theme.SurfacePressed,
+		}):Play()
+		TweenService:Create(buttonScale, TweenFast, {Scale = 0.97}):Play()
+	end
 
-	btn.MouseButton1Up:Connect(function()
-		TweenService:Create(
-			btn,
-			TweenFast,
-			{
-				BackgroundTransparency = 0.18,
-				BackgroundColor3 = Theme.SurfaceHover,
-			}
-		):Play()
+	local function releaseButton()
+		TweenService:Create(btn, TweenFast, {
+			BackgroundTransparency = 0.18,
+			BackgroundColor3 = Theme.SurfaceHover,
+		}):Play()
+		TweenService:Create(buttonScale, TweenFast, {Scale = 1}):Play()
+	end
+
+	btn.MouseButton1Down:Connect(pressButton)
+	btn.MouseButton1Up:Connect(releaseButton)
+	btn.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.Touch then pressButton() end
+	end)
+	btn.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.Touch then releaseButton() end
 	end)
 
 	return btn
@@ -1370,6 +1670,7 @@ end
 
 local ESPPage = createTab("ESP", Theme.AccentSoft)
 local WaypointPage = createTab("Pins", Theme.AccentSoft)
+local WarningPage = createTab("Warnings", Theme.AccentSoft)
 local SpeedPage = createTab("Speed", Theme.AccentSoft)
 local OthersPage = createTab("Others", Theme.AccentSoft)
 local SettingsPage = createTab("Config", Theme.AccentSoft)
@@ -1383,49 +1684,100 @@ setTabVisual(Containers["ESP"].Button, true, true)
 local function applyHealthBar(character, humanoid, tagPrefix, alwaysOnTop)
 	local rootPart = character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Head") or character:FindFirstChildWhichIsA("BasePart")
 	if not rootPart then return end
-	
+
 	if rootPart:FindFirstChild(tagPrefix.."_HEALTH_BAR") then
 		rootPart[tagPrefix.."_HEALTH_BAR"]:Destroy()
 	end
-	
+
 	local bb = Instance.new("BillboardGui")
 	bb.Name = tagPrefix.."_HEALTH_BAR"
 	bb.Adornee = rootPart
-	bb.Size = UDim2.new(0, 65, 0, 12)
-	bb.StudsOffset = Vector3.new(0, 3.2, 0)
+	bb.Size = UDim2.new(0, 78, 0, 15)
+	bb.StudsOffset = Vector3.new(0, 3.25, 0)
 	bb.AlwaysOnTop = alwaysOnTop
+	bb.LightInfluence = 0
 	bb.Parent = rootPart
-	
-	local bg = Instance.new("Frame", bb)
+
+	local bg = Instance.new("Frame")
 	bg.Name = "HealthBackground"
 	bg.Size = UDim2.new(1, 0, 1, 0)
-	bg.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-	bg.BackgroundTransparency = 0.2
-	Instance.new("UICorner", bg).CornerRadius = UDim.new(1, 0)
-	
-	local stroke = Instance.new("UIStroke", bg)
-	stroke.Color = Color3.fromRGB(200, 220, 240); stroke.Transparency = 0.4
-	
-	local fill = Instance.new("Frame", bg)
+	bg.BackgroundColor3 = Color3.fromRGB(235, 242, 248)
+	bg.BackgroundTransparency = 0.18
+	bg.BorderSizePixel = 0
+	bg.Parent = bb
+
+	local bgCorner = Instance.new("UICorner")
+	bgCorner.CornerRadius = UDim.new(1, 0)
+	bgCorner.Parent = bg
+
+	local bgGradient = Instance.new("UIGradient")
+	bgGradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+		ColorSequenceKeypoint.new(0.5, Color3.fromRGB(235, 242, 248)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(210, 222, 235)),
+	})
+	bgGradient.Rotation = 90
+	bgGradient.Parent = bg
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(255, 255, 255)
+	stroke.Transparency = 0.30
+	stroke.Thickness = 1
+	stroke.Parent = bg
+
+	local fill = Instance.new("Frame")
 	fill.Name = "HealthFill"
 	fill.Size = UDim2.new(math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1), 0, 1, 0)
-	-- Player health bars inherit the exact Player ESP highlight color.
-	-- NPC bars keep the neutral hub accent.
 	fill.BackgroundColor3 = (tagPrefix == "PLAYER") and HubState.PlayerColor or Theme.Accent
-	Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
-	
-	local hpText = Instance.new("TextLabel", bg)
-	hpText.Size = UDim2.new(1, 0, 1, 0)
+	fill.BackgroundTransparency = 0.02
+	fill.BorderSizePixel = 0
+	fill.ClipsDescendants = true
+	fill.Parent = bg
+
+	local fillCorner = Instance.new("UICorner")
+	fillCorner.CornerRadius = UDim.new(1, 0)
+	fillCorner.Parent = fill
+
+	local fillGradient = Instance.new("UIGradient")
+	local baseColor = fill.BackgroundColor3
+	fillGradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, baseColor:Lerp(Color3.new(1, 1, 1), 0.28)),
+		ColorSequenceKeypoint.new(0.45, baseColor),
+		ColorSequenceKeypoint.new(1, baseColor:Lerp(Color3.new(0, 0, 0), 0.18)),
+	})
+	fill:SetAttribute("GeminiBaseColor", baseColor)
+	fillGradient.Rotation = 90
+	fillGradient.Parent = fill
+
+	local hpText = Instance.new("TextLabel")
+	hpText.Size = UDim2.new(1, -6, 1, 0)
+	hpText.Position = UDim2.new(0, 3, 0, 0)
 	hpText.BackgroundTransparency = 1
 	hpText.Text = math.floor(humanoid.Health) .. " / " .. math.floor(humanoid.MaxHealth)
-	hpText.TextColor3 = Color3.fromRGB(30, 45, 60)
+	hpText.TextColor3 = Color3.fromRGB(255, 255, 255)
 	hpText.Font = Enum.Font.GothamBold
-	hpText.TextSize = 9
+	hpText.TextSize = 8
+	hpText.TextStrokeTransparency = 0.48
+	hpText.TextStrokeColor3 = Color3.fromRGB(20, 30, 40)
 	hpText.ZIndex = 2
-	
+	hpText.Parent = bg
+
+	local shadowOk, shadow = pcall(function() return Instance.new("UIShadow") end)
+	if shadowOk and shadow then
+		pcall(function()
+			shadow.Transparency = 0.82
+			shadow.BlurRadius = UDim.new(0, 5)
+			shadow.Offset = UDim2.new(0, 0, 0, 2)
+			shadow.Parent = bg
+		end)
+	end
+
 	local conn
 	conn = humanoid.HealthChanged:Connect(function(health)
-		if not bb or not bb.Parent then conn:Disconnect() return end
+		if not bb or not bb.Parent then
+			if conn then conn:Disconnect() end
+			return
+		end
 		fill.Size = UDim2.new(math.clamp(health / humanoid.MaxHealth, 0, 1), 0, 1, 0)
 		hpText.Text = math.floor(health) .. " / " .. math.floor(humanoid.MaxHealth)
 	end)
@@ -1438,71 +1790,116 @@ createSectionHeader("NPCs", ESPPage)
 local NPCToggleBtn = createButton("Toggle NPC ESP: OFF", ESPPage, Theme.Surface)
 local NPCUpdateBtn = createButton("Refresh Scan NPCs", ESPPage, Color3.fromRGB(215, 235, 255))
 
-createSlider("NPC Fill Transparency", HubState.NPCFill, 0, 1, ESPPage, function(val) 
-	HubState.NPCFill = val 
-	for _, v in pairs(Workspace:GetDescendants()) do
-		if v:IsA("Highlight") and v.Name == "NPC_HIGHLIGHT" then v.FillTransparency = val end
-	end
-end)
-createSlider("NPC Outline Transparency", HubState.NPCOutline, 0, 1, ESPPage, function(val) 
-	HubState.NPCOutline = val 
-	for _, v in pairs(Workspace:GetDescendants()) do
-		if v:IsA("Highlight") and v.Name == "NPC_HIGHLIGHT" then v.OutlineTransparency = val end
-	end
-end)
+local NPCHighlights = {}
+local NPCHealthBars = {}
+local NPCDescendantConnection
 
-local function applyNPC(model)
-	if not HubState.NPCToggled then return end
-	if Players:GetPlayerFromCharacter(model) then return end
-	local humanoid = model:FindFirstChildOfClass("Humanoid")
-	if humanoid then
-		if not model:FindFirstChild("NPC_HIGHLIGHT") then
-			local h = Instance.new("Highlight")
-			h.Name = "NPC_HIGHLIGHT"
-			h.FillColor = Color3.fromRGB(255, 255, 255)
-			h.FillTransparency = HubState.NPCFill
-			h.OutlineColor = Color3.fromRGB(150, 200, 240)
-			h.OutlineTransparency = HubState.NPCOutline
-			h.Parent = model
-		end
-		applyHealthBar(model, humanoid, "NPC", false)
+local function clearNPCESP()
+	for model, highlight in pairs(NPCHighlights) do
+		if highlight and highlight.Parent then highlight:Destroy() end
+		NPCHighlights[model] = nil
 	end
-end
-
-local function updateNPCESP()
+	for model, bar in pairs(NPCHealthBars) do
+		if bar and bar.Parent then bar:Destroy() end
+		NPCHealthBars[model] = nil
+	end
+	-- Clean up legacy instances that may have been created by an older run.
 	for _, v in pairs(Workspace:GetDescendants()) do
 		if v:IsA("Highlight") and v.Name == "NPC_HIGHLIGHT" then v:Destroy() end
 		if v:IsA("BillboardGui") and string.find(v.Name, "NPC_HEALTH_BAR") then v:Destroy() end
 	end
+end
+
+createSlider("NPC Fill Transparency", HubState.NPCFill, 0, 1, ESPPage, function(val)
+	HubState.NPCFill = val
+	for _, highlight in pairs(NPCHighlights) do
+		if highlight and highlight.Parent then highlight.FillTransparency = val end
+	end
+end)
+
+createSlider("NPC Outline Transparency", HubState.NPCOutline, 0, 1, ESPPage, function(val)
+	HubState.NPCOutline = val
+	for _, highlight in pairs(NPCHighlights) do
+		if highlight and highlight.Parent then highlight.OutlineTransparency = val end
+	end
+end)
+
+local function applyNPC(model)
+	if not HubState.NPCToggled or not model or not model:IsA("Model") then return end
+	if Players:GetPlayerFromCharacter(model) then return end
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if not humanoid then return end
+
+	local existing = model:FindFirstChild("NPC_HIGHLIGHT")
+	if existing and existing:IsA("Highlight") then
+		existing.FillTransparency = HubState.NPCFill
+		existing.OutlineTransparency = HubState.NPCOutline
+		NPCHighlights[model] = existing
+	else
+		local h = Instance.new("Highlight")
+		h.Name = "NPC_HIGHLIGHT"
+		h.FillColor = Color3.fromRGB(255, 255, 255)
+		h.FillTransparency = HubState.NPCFill
+		h.OutlineColor = Color3.fromRGB(150, 200, 240)
+		h.OutlineTransparency = HubState.NPCOutline
+		h.Parent = model
+		NPCHighlights[model] = h
+	end
+
+	local root = model:FindFirstChild("HumanoidRootPart") or model:FindFirstChild("Head") or model:FindFirstChildWhichIsA("BasePart")
+	local oldBar = root and root:FindFirstChild("NPC_HEALTH_BAR")
+	if oldBar then oldBar:Destroy() end
+	applyHealthBar(model, humanoid, "NPC", false)
+	if root then NPCHealthBars[model] = root:FindFirstChild("NPC_HEALTH_BAR") end
+end
+
+local function scanNPCsOnce()
+	clearNPCESP()
 	if not HubState.NPCToggled then return end
 	for _, descendant in pairs(Workspace:GetDescendants()) do
 		if descendant:IsA("Humanoid") then
 			local model = descendant.Parent
-			if model and model:IsA("Model") then applyNPC(model) end
+			if model and model:IsA("Model") then
+				applyNPC(model)
+			end
 		end
+	end
+end
+
+local function startNPCWatcher()
+	if NPCDescendantConnection then return end
+	NPCDescendantConnection = Workspace.DescendantAdded:Connect(function(descendant)
+		if not HubState.NPCToggled or not descendant:IsA("Humanoid") then return end
+		task.defer(function()
+			local model = descendant.Parent
+			if model and model:IsA("Model") then applyNPC(model) end
+		end)
+	end)
+end
+
+local function stopNPCWatcher()
+	if NPCDescendantConnection then
+		NPCDescendantConnection:Disconnect()
+		NPCDescendantConnection = nil
 	end
 end
 
 NPCToggleBtn.MouseButton1Click:Connect(function()
 	HubState.NPCToggled = not HubState.NPCToggled
 	NPCToggleBtn.Text = "Toggle NPC ESP: " .. (HubState.NPCToggled and "ON" or "OFF")
-	updateNPCESP()
-end)
-NPCUpdateBtn.MouseButton1Click:Connect(function() updateNPCESP() end)
-
-task.spawn(function()
-	while task.wait(2) do
-		if HubState.NPCToggled then
-			for _, descendant in pairs(Workspace:GetDescendants()) do
-				if descendant:IsA("Humanoid") then
-					local model = descendant.Parent
-					if model and model:IsA("Model") and not model:FindFirstChild("NPC_HIGHLIGHT") then
-						applyNPC(model)
-					end
-				end
-			end
-		end
+	if HubState.NPCToggled then
+		scanNPCsOnce()
+		startNPCWatcher()
+	else
+		stopNPCWatcher()
+		clearNPCESP()
 	end
+end)
+
+NPCUpdateBtn.MouseButton1Click:Connect(function()
+	-- Refresh is now the expensive Workspace scan. Normal runtime is event-driven.
+	scanNPCsOnce()
+	if HubState.NPCToggled then startNPCWatcher() end
 end)
 
 createSectionHeader("Players", ESPPage)
@@ -1543,6 +1940,14 @@ create2DColorPicker("Player Highlight Color", HubState.PlayerColor, ESPPage, fun
 			local healthFill = healthBg and healthBg:FindFirstChild("HealthFill")
 			if healthFill then
 				healthFill.BackgroundColor3 = newColor
+				local healthGradient = healthFill:FindFirstChildOfClass("UIGradient")
+				if healthGradient then
+					healthGradient.Color = ColorSequence.new({
+						ColorSequenceKeypoint.new(0, newColor:Lerp(Color3.new(1, 1, 1), 0.28)),
+						ColorSequenceKeypoint.new(0.45, newColor),
+						ColorSequenceKeypoint.new(1, newColor:Lerp(Color3.new(0, 0, 0), 0.18)),
+					})
+				end
 			end
 		end
 	end
@@ -2215,22 +2620,78 @@ KeybindBtn.MouseButton1Click:Connect(function()
 end)
 
 getgenv().GeminiKeybindConn = UserInputService.InputBegan:Connect(function(input, gpe)
+	if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+
 	if HubState.IsRebinding then
-		if input.UserInputType == Enum.UserInputType.Keyboard then
-			HubState.ToggleKeybind = input.KeyCode
-			KeybindBtn.Text = input.KeyCode.Name
-			HubState.IsRebinding = false
+		HubState.ToggleKeybind = input.KeyCode
+		KeybindBtn.Text = input.KeyCode.Name
+		HubState.IsRebinding = false
+		return
+	end
+
+	if HubState.IsRebindingOpenMenu then
+		HubState.OpenMenuKeybind = input.KeyCode
+		OpenMenuBtn.Text = input.KeyCode.Name
+		HubState.IsRebindingOpenMenu = false
+		return
+	end
+
+	if gpe then return end
+
+	if input.KeyCode == HubState.ToggleKeybind then
+		local now = tick()
+		if now - HubState.LastToggleTick > 0.2 then
+			HubState.LastToggleTick = now
+			toggleSpeedEngine()
 		end
-	elseif not gpe and input.UserInputType == Enum.UserInputType.Keyboard then
-		if input.KeyCode == HubState.ToggleKeybind then
-			local now = tick()
-			if now - HubState.LastToggleTick > 0.2 then
-				HubState.LastToggleTick = now
-				toggleSpeedEngine()
-			end
-		end
+	elseif input.KeyCode == HubState.OpenMenuKeybind then
+		MainFrame.Visible = not MainFrame.Visible
+		if MainFrame.Visible then updateNotificationPosition() end
 	end
 end)
+
+local OpenMenuContainer = Instance.new("Frame", SettingsPage)
+OpenMenuContainer.Size = UDim2.new(1, 0, 0, 36)
+OpenMenuContainer.BackgroundTransparency = 1
+
+local OpenMenuText = Instance.new("TextLabel", OpenMenuContainer)
+OpenMenuText.Size = UDim2.new(0.6, 0, 1, 0)
+OpenMenuText.BackgroundTransparency = 1
+OpenMenuText.Text = "Menu Toggle Keybind:"
+OpenMenuText.TextColor3 = Theme.Text
+OpenMenuText.Font = Enum.Font.GothamBold
+OpenMenuText.TextSize = 11
+OpenMenuText.TextXAlignment = Enum.TextXAlignment.Left
+
+local OpenMenuBtn = Instance.new("TextButton", OpenMenuContainer)
+OpenMenuBtn.Size = UDim2.new(0.38, 0, 1, 0)
+OpenMenuBtn.Position = UDim2.new(0.62, 0, 0, 0)
+OpenMenuBtn.BackgroundColor3 = Theme.Surface
+OpenMenuBtn.BackgroundTransparency = 0.28
+OpenMenuBtn.BorderSizePixel = 0
+OpenMenuBtn.Text = HubState.OpenMenuKeybind.Name
+OpenMenuBtn.TextColor3 = Theme.Text
+OpenMenuBtn.Font = Enum.Font.GothamBold
+OpenMenuBtn.TextSize = 11
+OpenMenuBtn.AutoButtonColor = false
+Instance.new("UICorner", OpenMenuBtn).CornerRadius = UDim.new(0, 8)
+
+OpenMenuBtn.MouseButton1Click:Connect(function()
+	HubState.IsRebindingOpenMenu = true
+	OpenMenuBtn.Text = "...Press Any Key..."
+end)
+
+local function setMenuVisible(visible)
+	if visible then
+		MainFrame.Visible = true
+		if minimized then
+			-- Keep the user's minimized state if they explicitly chose it.
+			return
+		end
+	else
+		MainFrame.Visible = false
+	end
+end
 
 createSectionHeader("Maintenance", SettingsPage)
 local PurgeBtn = createButton("Reset & Purge All ESP Instances", SettingsPage, Theme.Surface)
@@ -2281,4 +2742,4 @@ RunService.Stepped:Connect(function()
 	end
 end)
 
-print("💎 Gemini Hub V13 Active: Liquid Glass UI • Waypoint Persistence • Player Reset ❄️💎")
+print("💎 Gemini Hub V14 Active: Liquid Glass UI • Optimized NPC ESP • Player Warnings • Notifications ❄️💎")
