@@ -1,4 +1,4 @@
--- 💎 GEMINI HUB V14 - LIQUID GLASS + ESP + PLAYER WARNING UPDATE 💎
+-- 💎 GEMINI HUB V14.2 - LIQUID GLASS + UI AUDIO POLISH 💎
 -- Root Cause Fixed: Restored full-spectrum rainbow pickers & shifted theme balance toward aquatic blue with green sliders! 💧🌈🌿
 
 local Players = game:GetService("Players")
@@ -7,6 +7,7 @@ local UserInputService = game:GetService("UserInputService")
 local CoreGui = game:GetService("CoreGui")
 local Workspace = game:GetService("Workspace")
 local TweenService = game:GetService("TweenService")
+local SoundService = game:GetService("SoundService")
 local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
 
@@ -410,6 +411,48 @@ local TweenSoft = TweenInfo.new(
 )
 
 -- ==========================================
+-- 🔊 UI SOUND SYSTEM
+-- ==========================================
+-- Short 2D UI sounds are parented to SoundService so they are not positional.
+local GeminiHubAudio = Instance.new("Folder")
+GeminiHubAudio.Name = "GeminiHub_UIAudio"
+GeminiHubAudio.Parent = SoundService
+
+local function makeUISound(name, assetId, volume)
+	local sound = Instance.new("Sound")
+	sound.Name = name
+	sound.SoundId = "rbxassetid://" .. tostring(assetId)
+	sound.Volume = volume
+	sound.Parent = GeminiHubAudio
+	return sound
+end
+
+-- Suggested defaults for short UI feedback. IDs/volumes are centralized so
+-- they can be swapped later without touching the button logic.
+local ButtonSFX = makeUISound("Button", 113397864512278, 0.12)
+local ToggleSFX = makeUISound("Toggle", 119541807359284, 0.16)
+
+local NotificationSFX1 = makeUISound("Notification_1", 115916891254154, 0.5)
+local NotificationSFX2 = makeUISound("Notification_2", 12221944, 0.2)
+
+local ResetSFX1 = makeUISound("Reset_1", 12222140, 0.5)
+local ResetSFX2 = makeUISound("Reset_2", 12222005, 0.5)
+
+local function playUISound(sound)
+	if not sound then return end
+	pcall(function()
+		sound.TimePosition = 0
+		sound:Play()
+	end)
+end
+
+local function playUISoundPair(a, b)
+	playUISound(a)
+	playUISound(b)
+end
+
+
+-- ==========================================
 -- 🪟 MAIN GLASS CARD
 -- ==========================================
 
@@ -652,7 +695,7 @@ MinMaxScale.Scale = 1
 MinMaxScale.Parent = MinMaxBtn
 
 local function pressMinMaxButton()
-	TweenService:Create(MinMaxScale, TweenFast, {Scale = 0.97}):Play()
+	TweenService:Create(MinMaxScale, TweenFast, {Scale = 1.035}):Play()
 	TweenService:Create(MinMaxBtn, TweenFast, {
 		BackgroundTransparency = 0,
 		BackgroundColor3 = Theme.White,
@@ -679,6 +722,7 @@ MinMaxBtn.InputEnded:Connect(function(input)
 end)
 
 MinMaxBtn.MouseButton1Click:Connect(function()
+	playUISound(ButtonSFX)
 	local currentSize = MainFrame.AbsoluteSize
 	local currentPos = MainFrame.Position
 	minimized = not minimized
@@ -816,7 +860,7 @@ NotificationLayout.Parent = NotificationContainer
 local function updateNotificationPosition()
 	local pos = MainFrame.AbsolutePosition
 	local size = MainFrame.AbsoluteSize
-	NotificationContainer.Position = UDim2.fromOffset(pos.X + (size.X / 2), pos.Y + size.Y + 9)
+	NotificationContainer.Position = UDim2.fromOffset(pos.X + (size.X / 2), pos.Y + size.Y + 16)
 end
 
 MainFrame:GetPropertyChangedSignal("Position"):Connect(updateNotificationPosition)
@@ -826,6 +870,7 @@ MainFrame:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateNotificationPos
 updateNotificationPosition()
 
 local function showNotification(titleText, messageText, duration)
+	playUISoundPair(NotificationSFX1, NotificationSFX2)
 	duration = duration or 3.5
 
 	local card = Instance.new("Frame")
@@ -994,6 +1039,10 @@ TabIndicatorStroke.Transparency = 0.28
 TabIndicatorStroke.Thickness = 1
 TabIndicatorStroke.Parent = TabIndicator
 
+local TabIndicatorScale = Instance.new("UIScale")
+TabIndicatorScale.Scale = 1
+TabIndicatorScale.Parent = TabIndicator
+
 local TabIndicatorGradient = Instance.new("UIGradient")
 TabIndicatorGradient.Color = ColorSequence.new({
 	ColorSequenceKeypoint.new(0, Theme.AccentSoft),
@@ -1015,22 +1064,29 @@ local function moveTabIndicator(btn, instant)
 		-- pixel positions are more reliable than reconstructing the math from
 		-- UDim2. Convert the pressed tab's absolute rectangle into MainFrame
 		-- coordinates so the glass pill lands exactly over that tab.
-		local mainPos = MainFrame.AbsolutePosition
+		local layerPos = TabIndicatorLayer.AbsolutePosition
 		local btnPos = btn.AbsolutePosition
 		local targetSize = UDim2.fromOffset(btn.AbsoluteSize.X, btn.AbsoluteSize.Y)
 		local targetPosition = UDim2.fromOffset(
-			btnPos.X - mainPos.X,
-			btnPos.Y - mainPos.Y
+			btnPos.X - layerPos.X,
+			btnPos.Y - layerPos.Y
 		)
 
 		if instant then
 			TabIndicator.Size = targetSize
 			TabIndicator.Position = targetPosition
+			TabIndicatorScale.Scale = 1
 		else
 			TweenService:Create(TabIndicator, TweenSoft, {
 				Size = targetSize,
 				Position = targetPosition,
 			}):Play()
+			TweenService:Create(TabIndicatorScale, TweenInfo.new(0.11, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Scale = 1.025}):Play()
+			task.delay(0.075, function()
+				if TabIndicator.Parent then
+					TweenService:Create(TabIndicatorScale, TweenInfo.new(0.17, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {Scale = 1}):Play()
+				end
+			end)
 		end
 	end)
 end
@@ -1070,6 +1126,9 @@ MainFrame:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
 end)
 
 local function activateTab(name)
+	if ActiveTabName ~= name then
+		playUISound(ButtonSFX)
+	end
 	ActiveTabName = name
 
 	for tabName, tab in pairs(Containers) do
@@ -1296,6 +1355,7 @@ local function createButton(text, parent, _pastelColor)
 	knobCorner.CornerRadius = UDim.new(1, 0)
 	knobCorner.Parent = knob
 
+	local lastStatus = nil
 	local function updateStatusVisual()
 		local upper = string.upper(btn.Text)
 		-- Only treat an explicit trailing ON/OFF state as a toggle.
@@ -1305,6 +1365,12 @@ local function createButton(text, parent, _pastelColor)
 		local isOff = string.match(upper, "OFF%s*$") ~= nil
 
 		status.Visible = isOn or isOff
+
+		local currentStatus = isOn and "ON" or (isOff and "OFF" or nil)
+		if currentStatus and lastStatus and currentStatus ~= lastStatus then
+			playUISound(ToggleSFX)
+		end
+		lastStatus = currentStatus
 
 		if not status.Visible then
 			return
@@ -1359,6 +1425,7 @@ local function createButton(text, parent, _pastelColor)
 		-- Toggle rows already have a moving status capsule, so avoid adding
 		-- the old size-compression animation on top of that UI.
 		if status.Visible then return end
+		playUISound(ButtonSFX)
 		TweenService:Create(btn, TweenFast, {
 			BackgroundTransparency = 0.08,
 			BackgroundColor3 = Theme.SurfacePressed,
@@ -2615,6 +2682,7 @@ end
 createSectionHeader("Player", OthersPage)
 local ResetPlayerBtn = createButton("Reset Character", OthersPage, Theme.Surface)
 ResetPlayerBtn.MouseButton1Click:Connect(function()
+	playUISoundPair(ResetSFX1, ResetSFX2)
 	local char = LocalPlayer.Character
 	if not char then return end
 
