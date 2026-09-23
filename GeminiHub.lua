@@ -3363,7 +3363,7 @@ function refreshStatusIndicator()
 	local npcState = HubState.NPCToggled and "ON" or "OFF"
 	local playerState = HubState.PlayerToggled and "ON" or "OFF"
 	StatusLabel.Text = "● Gemini Hub Ready\nUI Sounds: " .. (HubState.UISoundsEnabled and "ON" or "OFF") .. "  •  Waypoints: " .. waypointMode .. "  •  Warnings: " .. warningMode .. "\nNPC ESP: " .. npcState .. "  •  Player ESP: " .. playerState .. "  •  Client-side UI"
-	StatusLabel.TextColor3 = Color3.fromRGB(205, 245, 220)
+	StatusLabel.TextColor3 = Color3.fromRGB(245, 255, 248)
 end
 refreshStatusIndicator()
 
