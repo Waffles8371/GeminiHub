@@ -1,4 +1,4 @@
--- 💎 GEMINI HUB V14.3 - LIQUID GLASS + UI AUDIO + CONTROL POLISH 💎
+-- 💎 GEMINI HUB V14.7 - WAYPOINT POLISH + SESSION MONITOR + DARK MODE 💎
 -- Root Cause Fixed: Restored full-spectrum rainbow pickers & shifted theme balance toward aquatic blue with green sliders! 💧🌈🌿
 
 local Players = game:GetService("Players")
@@ -94,6 +94,7 @@ local HubState = {
 
 	-- UI Controls
 	UISoundsEnabled = true,
+	DarkModeEnabled = false,
 }
 
 -- ==========================================
@@ -686,7 +687,7 @@ local Version = Instance.new("TextLabel")
 Version.Size = UDim2.new(1, -80, 0, 16)
 Version.Position = UDim2.new(0, 20, 0, 31)
 Version.BackgroundTransparency = 1
-Version.Text = "v14.1"
+Version.Text = "v14.7"
 Version.TextColor3 = Theme.TextSecondary
 Version.Font = Enum.Font.Gotham
 Version.TextSize = 10
@@ -1935,6 +1936,19 @@ local function refreshWarningList()
 			label.TextSize = 10
 			label.TextXAlignment = Enum.TextXAlignment.Left
 			label.Parent = row
+
+			local stateLabel = Instance.new("TextLabel")
+			stateLabel.Name = "ServerState"
+			stateLabel.Size = UDim2.new(0, 82, 1, 0)
+			stateLabel.Position = UDim2.new(1, -112, 0, 0)
+			stateLabel.BackgroundTransparency = 1
+			stateLabel.Text = currentlyInServer and "In Server" or "Not in Server"
+			stateLabel.TextColor3 = currentlyInServer and Color3.fromRGB(70, 185, 105) or Theme.TextSecondary
+			stateLabel.Font = Enum.Font.GothamMedium
+			stateLabel.TextSize = 9
+			stateLabel.TextXAlignment = Enum.TextXAlignment.Right
+			stateLabel.Parent = row
+
 			local remove = Instance.new("TextButton")
 			remove.Size = UDim2.fromOffset(28,24)
 			remove.Position = UDim2.new(1,-32,0.5,-12)
@@ -2528,9 +2542,11 @@ local function spawnWaypointWorldUI(wpData)
 	label.Position = UDim2.new(0.5, -20, 0, 32)
 	label.BackgroundTransparency = 1
 	label.Text = wpData.Name
-	label.TextColor3 = Color3.fromRGB(30, 45, 60)
+	label.TextColor3 = Color3.fromRGB(255, 255, 255)
 	label.Font = Enum.Font.GothamBold
 	label.TextSize = 11
+	label.TextStrokeTransparency = 0.18
+	label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 	label.ZIndex = 4
 	
 	local distLabel = Instance.new("TextLabel", bb)
@@ -2538,8 +2554,10 @@ local function spawnWaypointWorldUI(wpData)
 	distLabel.Position = UDim2.new(0.5, -20, 0, 47)
 	distLabel.BackgroundTransparency = 1
 	distLabel.Text = "0m"
-	distLabel.TextColor3 = Color3.fromRGB(80, 100, 120)
+	distLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 	distLabel.Font = Enum.Font.Gotham
+	distLabel.TextStrokeTransparency = 0.25
+	distLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 	distLabel.TextSize = 10
 	distLabel.ZIndex = 4
 	
@@ -2629,12 +2647,6 @@ local ApplyViewBaselineBtn = createButton("Apply", ViewBaselineFrame, Theme.Surf
 ApplyViewBaselineBtn.Size = UDim2.new(0.12, 0, 0, 30)
 ApplyViewBaselineBtn.Position = UDim2.new(0.87, 0, 0, 8)
 ApplyViewBaselineBtn.TextSize = 10
-ApplyViewBaselineBtn.TextXAlignment = Enum.TextXAlignment.Center
-local ApplyViewBaselinePadding = ApplyViewBaselineBtn:FindFirstChildOfClass("UIPadding")
-if ApplyViewBaselinePadding then
-	ApplyViewBaselinePadding.PaddingLeft = UDim.new(0, 0)
-	ApplyViewBaselinePadding.PaddingRight = UDim.new(0, 0)
-end
 local ApplyViewBaselineStatus = ApplyViewBaselineBtn:FindFirstChild("StatusPill")
 if ApplyViewBaselineStatus then ApplyViewBaselineStatus.Visible = false end
 
@@ -3174,6 +3186,62 @@ local function setMenuVisible(visible)
 	end
 end
 
+createSectionHeader("Live Session", SettingsPage)
+local SessionMonitorFrame = Instance.new("Frame", SettingsPage)
+SessionMonitorFrame.Size = UDim2.new(1, 0, 0, 62)
+SessionMonitorFrame.BackgroundColor3 = Theme.Surface
+SessionMonitorFrame.BackgroundTransparency = 0.42
+SessionMonitorFrame.BorderSizePixel = 0
+Instance.new("UICorner", SessionMonitorFrame).CornerRadius = UDim.new(0, 11)
+local SessionMonitorStroke = Instance.new("UIStroke", SessionMonitorFrame)
+SessionMonitorStroke.Color = Theme.White
+SessionMonitorStroke.Transparency = 0.58
+
+local PlayerCountLabel = Instance.new("TextLabel", SessionMonitorFrame)
+PlayerCountLabel.Size = UDim2.new(0.5, -10, 0, 24)
+PlayerCountLabel.Position = UDim2.new(0, 10, 0, 7)
+PlayerCountLabel.BackgroundTransparency = 1
+PlayerCountLabel.TextColor3 = Theme.Text
+PlayerCountLabel.Font = Enum.Font.GothamBold
+PlayerCountLabel.TextSize = 11
+PlayerCountLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+local SessionUptimeLabel = Instance.new("TextLabel", SessionMonitorFrame)
+SessionUptimeLabel.Size = UDim2.new(0.5, -10, 0, 24)
+SessionUptimeLabel.Position = UDim2.new(0.5, 0, 0, 7)
+SessionUptimeLabel.BackgroundTransparency = 1
+SessionUptimeLabel.TextColor3 = Theme.TextSecondary
+SessionUptimeLabel.Font = Enum.Font.GothamBold
+SessionUptimeLabel.TextSize = 11
+SessionUptimeLabel.TextXAlignment = Enum.TextXAlignment.Right
+
+local SessionJobLabel = Instance.new("TextLabel", SessionMonitorFrame)
+SessionJobLabel.Size = UDim2.new(1, -20, 0, 18)
+SessionJobLabel.Position = UDim2.new(0, 10, 0, 35)
+SessionJobLabel.BackgroundTransparency = 1
+SessionJobLabel.TextColor3 = Theme.TextSecondary
+SessionJobLabel.Font = Enum.Font.Gotham
+SessionJobLabel.TextSize = 8.5
+SessionJobLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+local monitorStartedAt = os.clock()
+local function formatSessionTime(seconds)
+	seconds = math.max(0, math.floor(seconds))
+	local h = math.floor(seconds / 3600)
+	local m = math.floor((seconds % 3600) / 60)
+	local sec = seconds % 60
+	return string.format("%02d:%02d:%02d", h, m, sec)
+end
+
+local function refreshSessionMonitor()
+	PlayerCountLabel.Text = "Players: " .. tostring(#Players:GetPlayers())
+	SessionUptimeLabel.Text = "Hub Uptime: " .. formatSessionTime(os.clock() - monitorStartedAt)
+	SessionJobLabel.Text = "Job ID: " .. tostring(game.JobId ~= "" and game.JobId or "Unavailable")
+end
+refreshSessionMonitor()
+Players.PlayerAdded:Connect(refreshSessionMonitor)
+Players.PlayerRemoving:Connect(refreshSessionMonitor)
+
 createSectionHeader("Interface", SettingsPage)
 local UISoundToggleBtn = createButton("Interface Sounds: " .. (HubState.UISoundsEnabled and "ON" or "OFF"), SettingsPage, Theme.Surface)
 UISoundToggleBtn.MouseButton1Click:Connect(function()
@@ -3182,7 +3250,95 @@ UISoundToggleBtn.MouseButton1Click:Connect(function()
 	refreshStatusIndicator()
 end)
 
-local StatusLabel = Instance.new("TextLabel")
+local DarkThemeToggleBtn = createButton("Dark Mode: " .. (HubState.DarkModeEnabled and "ON" or "OFF"), SettingsPage, Theme.Surface)
+
+local function applyTheme(dark)
+	HubState.DarkModeEnabled = dark
+	if dark then
+		Theme.Panel = Color3.fromRGB(24, 28, 34)
+		Theme.PanelBottom = Color3.fromRGB(16, 20, 26)
+		Theme.Surface = Color3.fromRGB(34, 40, 48)
+		Theme.SurfaceHover = Color3.fromRGB(44, 51, 61)
+		Theme.SurfacePressed = Color3.fromRGB(52, 60, 71)
+		Theme.Accent = Color3.fromRGB(92, 166, 255)
+		Theme.AccentSoft = Color3.fromRGB(67, 105, 145)
+		Theme.Text = Color3.fromRGB(242, 246, 250)
+		Theme.TextSecondary = Color3.fromRGB(165, 177, 191)
+		Theme.White = Color3.fromRGB(225, 232, 240)
+		Theme.Track = Color3.fromRGB(67, 77, 90)
+	else
+		Theme.Panel = Color3.fromRGB(245, 250, 255)
+		Theme.PanelBottom = Color3.fromRGB(215, 235, 255)
+		Theme.Surface = Color3.fromRGB(240, 248, 255)
+		Theme.SurfaceHover = Color3.fromRGB(250, 253, 255)
+		Theme.SurfacePressed = Color3.fromRGB(225, 240, 255)
+		Theme.Accent = Color3.fromRGB(66, 133, 244)
+		Theme.AccentSoft = Color3.fromRGB(190, 220, 255)
+		Theme.Text = Color3.fromRGB(30, 45, 60)
+		Theme.TextSecondary = Color3.fromRGB(95, 115, 135)
+		Theme.White = Color3.fromRGB(255, 255, 255)
+		Theme.Track = Color3.fromRGB(205, 220, 235)
+	end
+
+	MainFrame.BackgroundColor3 = Theme.Panel
+	MainStroke.Color = Theme.White
+	TopShine.BackgroundColor3 = Theme.White
+	TabBar.BackgroundColor3 = Theme.White
+	TabStroke.Color = Theme.White
+	TabIndicator.BackgroundColor3 = Theme.White
+	TabIndicatorStroke.Color = Theme.White
+	TabIndicatorGradient.Color = ColorSequence.new({ColorSequenceKeypoint.new(0, Theme.AccentSoft), ColorSequenceKeypoint.new(0.55, Theme.White), ColorSequenceKeypoint.new(1, Theme.AccentSoft)})
+	for _, tab in pairs(Containers) do
+		tab.Button.BackgroundColor3 = Theme.White
+		tab.Button.TextColor3 = (tab.Page.Visible and Theme.Accent or Theme.TextSecondary)
+		local tabStroke = tab.Button:FindFirstChild("TabStroke")
+		if tabStroke then tabStroke.Color = Theme.Accent end
+	end
+
+	for _, obj in ipairs(ScreenGui:GetDescendants()) do
+		if obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox") then
+			obj.TextColor3 = Theme.Text
+		elseif obj:IsA("ScrollingFrame") then
+			obj.ScrollBarImageColor3 = Theme.Accent
+		elseif obj:IsA("UIStroke") then
+			if obj.Name ~= "TabStroke" then obj.Color = Theme.White end
+		end
+	end
+
+	for _, page in ipairs({ESPPage, WaypointPage, WarningPage, SpeedPage, OthersPage, SettingsPage}) do
+		for _, obj in ipairs(page:GetDescendants()) do
+			if obj:IsA("TextButton") then
+				obj.BackgroundColor3 = Theme.Surface
+			elseif obj:IsA("TextBox") then
+				obj.BackgroundColor3 = Theme.Surface
+			elseif obj:IsA("Frame") and obj.BackgroundTransparency < 1 then
+				if obj.Name ~= "StatusPill" and obj.Name ~= "Knob" then
+					obj.BackgroundColor3 = Theme.Surface
+				end
+			end
+		end
+	end
+
+	for _, obj in ipairs(ScreenGui:GetDescendants()) do
+		if obj.Name == "StatusPill" then
+			obj.BackgroundColor3 = Theme.Track
+		elseif obj.Name == "Knob" then
+			obj.BackgroundColor3 = Theme.White
+		end
+	end
+
+	StatusLabel.BackgroundColor3 = dark and Color3.fromRGB(47, 75, 61) or Color3.fromRGB(105, 155, 125)
+	StatusLabel.BackgroundTransparency = dark and 0.12 or 0.18
+	StatusLabel.TextColor3 = dark and Color3.fromRGB(228, 255, 237) or Color3.fromRGB(245, 255, 248)
+	DarkThemeToggleBtn.Text = "Dark Mode: " .. (dark and "ON" or "OFF")
+	refreshStatusIndicator()
+end
+
+DarkThemeToggleBtn.MouseButton1Click:Connect(function()
+	applyTheme(not HubState.DarkModeEnabled)
+end)
+
+StatusLabel = Instance.new("TextLabel")
 StatusLabel.Size = UDim2.new(1, 0, 0, 64)
 StatusLabel.BackgroundColor3 = Theme.Surface
 StatusLabel.BackgroundTransparency = 0.35
@@ -3201,15 +3357,13 @@ statusPad.PaddingLeft = UDim.new(0, 12)
 statusPad.PaddingRight = UDim.new(0, 12)
 statusPad.Parent = StatusLabel
 
-local function refreshStatusIndicator()
+function refreshStatusIndicator()
 	local waypointMode = WaypointPersistenceMode or "Unavailable"
 	local warningMode = WarningPersistenceMode or "Unavailable"
 	local npcState = HubState.NPCToggled and "ON" or "OFF"
 	local playerState = HubState.PlayerToggled and "ON" or "OFF"
 	StatusLabel.Text = "● Gemini Hub Ready\nUI Sounds: " .. (HubState.UISoundsEnabled and "ON" or "OFF") .. "  •  Waypoints: " .. waypointMode .. "  •  Warnings: " .. warningMode .. "\nNPC ESP: " .. npcState .. "  •  Player ESP: " .. playerState .. "  •  Client-side UI"
-	StatusLabel.BackgroundColor3 = Color3.fromRGB(105, 155, 125)
-	StatusLabel.BackgroundTransparency = 0.18
-	StatusLabel.TextColor3 = Color3.fromRGB(245, 255, 248)
+	StatusLabel.TextColor3 = Color3.fromRGB(205, 245, 220)
 end
 refreshStatusIndicator()
 
@@ -3226,6 +3380,7 @@ end)
 
 -- Global Render Loop Monitor
 RunService.Stepped:Connect(function()
+	refreshSessionMonitor()
 	local char = LocalPlayer.Character
 	if char then
 		local hum = char:FindFirstChildOfClass("Humanoid")
@@ -3262,4 +3417,4 @@ RunService.Stepped:Connect(function()
 	end
 end)
 
-print("💎 Gemini Hub V14.4 Active: Liquid Glass UI • Optimized NPC ESP • Player Warnings • Notifications ❄️💎")
+print("💎 Gemini Hub V14.7 Active: Liquid Glass UI • Waypoint Polish • Session Monitor • Dark Mode ❄️💎")
