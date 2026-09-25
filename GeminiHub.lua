@@ -1,4 +1,4 @@
--- 💎 GEMINI HUB V14.7 - WAYPOINT POLISH + SESSION MONITOR + DARK MODE 💎
+-- 💎 GEMINI HUB V14.7 FIXED - WAYPOINT POLISH + SESSION MONITOR + DARK MODE 💎
 -- Root Cause Fixed: Restored full-spectrum rainbow pickers & shifted theme balance toward aquatic blue with green sliders! 💧🌈🌿
 
 local Players = game:GetService("Players")
@@ -3247,7 +3247,8 @@ local UISoundToggleBtn = createButton("Interface Sounds: " .. (HubState.UISounds
 UISoundToggleBtn.MouseButton1Click:Connect(function()
 	HubState.UISoundsEnabled = not HubState.UISoundsEnabled
 	UISoundToggleBtn.Text = "Interface Sounds: " .. (HubState.UISoundsEnabled and "ON" or "OFF")
-	refreshStatusIndicator()
+	-- Status indicator is initialized later in this section.
+	-- Do not refresh it here before its function exists.
 end)
 
 local DarkThemeToggleBtn = createButton("Dark Mode: " .. (HubState.DarkModeEnabled and "ON" or "OFF"), SettingsPage, Theme.Surface)
@@ -3338,7 +3339,7 @@ DarkThemeToggleBtn.MouseButton1Click:Connect(function()
 	applyTheme(not HubState.DarkModeEnabled)
 end)
 
-StatusLabel = Instance.new("TextLabel")
+local StatusLabel = Instance.new("TextLabel")
 StatusLabel.Size = UDim2.new(1, 0, 0, 64)
 StatusLabel.BackgroundColor3 = Theme.Surface
 StatusLabel.BackgroundTransparency = 0.35
