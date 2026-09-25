@@ -2626,6 +2626,7 @@ ViewBaselineBox.ClearTextOnFocus = false
 Instance.new("UICorner", ViewBaselineBox).CornerRadius = UDim.new(0, 8)
 
 local ApplyViewBaselineBtn = createButton("Apply", ViewBaselineFrame, Theme.Surface)
+ApplyViewBaselineBtn.TextXAlignment = Enum.TextXAlignment.Center
 ApplyViewBaselineBtn.Size = UDim2.new(0.12, 0, 0, 30)
 ApplyViewBaselineBtn.Position = UDim2.new(0.87, 0, 0, 8)
 ApplyViewBaselineBtn.TextSize = 10
