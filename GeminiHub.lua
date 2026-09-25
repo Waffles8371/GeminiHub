@@ -1,5 +1,5 @@
--- 💎 GEMINI HUB V14.3 - LIQUID GLASS + UI AUDIO + CONTROL POLISH 💎
--- Root Cause Fixed: Restored full-spectrum rainbow pickers & shifted theme balance toward aquatic blue with green sliders! 💧🌈🌿
+-- 💎 GEMINI HUB V14.7 - LIQUID GLASS + UI AUDIO + CONTROL POLISH 💎
+-- Controlled V14.7 feature build: waypoint text polish, live session monitor, dark mode, and status-card contrast.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -686,7 +686,7 @@ local Version = Instance.new("TextLabel")
 Version.Size = UDim2.new(1, -80, 0, 16)
 Version.Position = UDim2.new(0, 20, 0, 31)
 Version.BackgroundTransparency = 1
-Version.Text = "v14.1"
+Version.Text = "v14.7"
 Version.TextColor3 = Theme.TextSecondary
 Version.Font = Enum.Font.Gotham
 Version.TextSize = 10
@@ -2528,7 +2528,9 @@ local function spawnWaypointWorldUI(wpData)
 	label.Position = UDim2.new(0.5, -20, 0, 32)
 	label.BackgroundTransparency = 1
 	label.Text = wpData.Name
-	label.TextColor3 = Color3.fromRGB(30, 45, 60)
+	label.TextColor3 = Color3.fromRGB(255, 255, 255)
+	label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	label.TextStrokeTransparency = 0.20
 	label.Font = Enum.Font.GothamBold
 	label.TextSize = 11
 	label.ZIndex = 4
@@ -2538,7 +2540,9 @@ local function spawnWaypointWorldUI(wpData)
 	distLabel.Position = UDim2.new(0.5, -20, 0, 47)
 	distLabel.BackgroundTransparency = 1
 	distLabel.Text = "0m"
-	distLabel.TextColor3 = Color3.fromRGB(80, 100, 120)
+	distLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	distLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	distLabel.TextStrokeTransparency = 0.28
 	distLabel.Font = Enum.Font.Gotham
 	distLabel.TextSize = 10
 	distLabel.ZIndex = 4
@@ -3178,8 +3182,8 @@ end)
 
 local StatusLabel = Instance.new("TextLabel")
 StatusLabel.Size = UDim2.new(1, 0, 0, 64)
-StatusLabel.BackgroundColor3 = Theme.Surface
-StatusLabel.BackgroundTransparency = 0.35
+StatusLabel.BackgroundColor3 = Color3.fromRGB(92, 145, 112)
+StatusLabel.BackgroundTransparency = 0.10
 StatusLabel.BorderSizePixel = 0
 StatusLabel.TextColor3 = Theme.Text
 StatusLabel.Font = Enum.Font.GothamMedium
@@ -3201,10 +3205,220 @@ local function refreshStatusIndicator()
 	local npcState = HubState.NPCToggled and "ON" or "OFF"
 	local playerState = HubState.PlayerToggled and "ON" or "OFF"
 	StatusLabel.Text = "● Gemini Hub Ready\nUI Sounds: " .. (HubState.UISoundsEnabled and "ON" or "OFF") .. "  •  Waypoints: " .. waypointMode .. "  •  Warnings: " .. warningMode .. "\nNPC ESP: " .. npcState .. "  •  Player ESP: " .. playerState .. "  •  Client-side UI"
-	StatusLabel.TextColor3 = Color3.fromRGB(205, 245, 220)
+	StatusLabel.TextColor3 = Color3.fromRGB(245, 255, 248)
 end
 refreshStatusIndicator()
 
+-- ==========================================
+-- 📡 LIVE SESSION MONITOR
+-- ==========================================
+local SessionStartTime = os.clock()
+
+createSectionHeader("Live Session", SettingsPage)
+
+local SessionStatusLabel = Instance.new("TextLabel")
+SessionStatusLabel.Size = UDim2.new(1, 0, 0, 58)
+SessionStatusLabel.BackgroundColor3 = Theme.Surface
+SessionStatusLabel.BackgroundTransparency = 0.35
+SessionStatusLabel.BorderSizePixel = 0
+SessionStatusLabel.TextColor3 = Theme.Text
+SessionStatusLabel.Font = Enum.Font.GothamMedium
+SessionStatusLabel.TextSize = 9
+SessionStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+SessionStatusLabel.TextYAlignment = Enum.TextYAlignment.Center
+SessionStatusLabel.TextWrapped = true
+SessionStatusLabel.Parent = SettingsPage
+Instance.new("UICorner", SessionStatusLabel).CornerRadius = UDim.new(0, 10)
+
+local sessionPad = Instance.new("UIPadding")
+sessionPad.PaddingLeft = UDim.new(0, 12)
+sessionPad.PaddingRight = UDim.new(0, 12)
+sessionPad.Parent = SessionStatusLabel
+
+local function formatSessionUptime()
+	local elapsed = math.max(0, math.floor(os.clock() - SessionStartTime))
+	local hours = math.floor(elapsed / 3600)
+	local minutes = math.floor((elapsed % 3600) / 60)
+	local seconds = elapsed % 60
+
+	if hours > 0 then
+		return string.format("%dh %02dm %02ds", hours, minutes, seconds)
+	elseif minutes > 0 then
+		return string.format("%dm %02ds", minutes, seconds)
+	else
+		return string.format("%ds", seconds)
+	end
+end
+
+local function refreshSessionMonitor()
+	SessionStatusLabel.Text =
+		"● Session Active\n" ..
+		"Players: " .. tostring(#Players:GetPlayers()) ..
+		"  •  Gemini Hub Uptime: " .. formatSessionUptime()
+end
+
+refreshSessionMonitor()
+
+Players.PlayerAdded:Connect(function()
+	task.defer(refreshSessionMonitor)
+end)
+
+Players.PlayerRemoving:Connect(function()
+	task.defer(refreshSessionMonitor)
+end)
+
+task.spawn(function()
+	while ScreenGui.Parent do
+		refreshSessionMonitor()
+		task.wait(1)
+	end
+end)
+
+-- ==========================================
+-- 🌙 DARK MODE
+-- ==========================================
+local LightTheme = {
+	Panel = Color3.fromRGB(245, 250, 255),
+	PanelBottom = Color3.fromRGB(215, 235, 255),
+	Surface = Color3.fromRGB(240, 248, 255),
+	SurfaceHover = Color3.fromRGB(250, 253, 255),
+	SurfacePressed = Color3.fromRGB(225, 240, 255),
+	Accent = Color3.fromRGB(66, 133, 244),
+	AccentSoft = Color3.fromRGB(190, 220, 255),
+	Text = Color3.fromRGB(30, 45, 60),
+	TextSecondary = Color3.fromRGB(95, 115, 135),
+	White = Color3.fromRGB(255, 255, 255),
+	Track = Color3.fromRGB(205, 220, 235),
+	PanelTransparency = 0.18,
+	SurfaceTransparency = 0.30,
+	BorderTransparency = 0.35,
+}
+
+local DarkTheme = {
+	Panel = Color3.fromRGB(25, 31, 39),
+	PanelBottom = Color3.fromRGB(14, 19, 26),
+	Surface = Color3.fromRGB(39, 47, 58),
+	SurfaceHover = Color3.fromRGB(51, 60, 72),
+	SurfacePressed = Color3.fromRGB(31, 39, 49),
+	Accent = Color3.fromRGB(94, 160, 255),
+	AccentSoft = Color3.fromRGB(66, 92, 125),
+	Text = Color3.fromRGB(240, 245, 250),
+	TextSecondary = Color3.fromRGB(165, 178, 193),
+	White = Color3.fromRGB(235, 241, 248),
+	Track = Color3.fromRGB(76, 88, 103),
+	PanelTransparency = 0.12,
+	SurfaceTransparency = 0.22,
+	BorderTransparency = 0.28,
+}
+
+local DarkModeEnabled = false
+
+local function copyThemeValues(source)
+	for key, value in pairs(source) do
+		Theme[key] = value
+	end
+end
+
+local function recolorByPalette(oldTheme)
+	for _, obj in ipairs(MainFrame:GetDescendants()) do
+		if obj:IsA("GuiObject") then
+			if obj.BackgroundColor3 == oldTheme.Panel then
+				obj.BackgroundColor3 = Theme.Panel
+			elseif obj.BackgroundColor3 == oldTheme.PanelBottom then
+				obj.BackgroundColor3 = Theme.PanelBottom
+			elseif obj.BackgroundColor3 == oldTheme.Surface then
+				obj.BackgroundColor3 = Theme.Surface
+			elseif obj.BackgroundColor3 == oldTheme.SurfaceHover then
+				obj.BackgroundColor3 = Theme.SurfaceHover
+			elseif obj.BackgroundColor3 == oldTheme.SurfacePressed then
+				obj.BackgroundColor3 = Theme.SurfacePressed
+			elseif obj.BackgroundColor3 == oldTheme.AccentSoft then
+				obj.BackgroundColor3 = Theme.AccentSoft
+			elseif obj.BackgroundColor3 == oldTheme.Track then
+				obj.BackgroundColor3 = Theme.Track
+			elseif obj.BackgroundColor3 == oldTheme.White and obj ~= TopShine then
+				obj.BackgroundColor3 = Theme.SurfaceHover
+			end
+
+			if obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox") then
+				if obj.TextColor3 == oldTheme.Text then
+					obj.TextColor3 = Theme.Text
+				elseif obj.TextColor3 == oldTheme.TextSecondary then
+					obj.TextColor3 = Theme.TextSecondary
+				elseif obj.TextColor3 == oldTheme.White then
+					obj.TextColor3 = Theme.White
+				end
+			end
+		elseif obj:IsA("UIStroke") then
+			if obj.Color == oldTheme.White then
+				obj.Color = Theme.White
+			elseif obj.Color == oldTheme.Accent then
+				obj.Color = Theme.Accent
+			end
+		end
+	end
+
+	MainFrame.BackgroundColor3 = Theme.Panel
+	MainFrame.BackgroundTransparency = Theme.PanelTransparency
+	MainStroke.Color = Theme.White
+	MainStroke.Transparency = Theme.BorderTransparency
+	TopShine.BackgroundColor3 = Theme.White
+
+	HubGradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Theme.Panel),
+		ColorSequenceKeypoint.new(0.55, Theme.Panel),
+		ColorSequenceKeypoint.new(1, Theme.PanelBottom),
+	})
+
+	if DarkModeEnabled then
+		MainStrokeGradient.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(235, 241, 248)),
+			ColorSequenceKeypoint.new(0.48, Color3.fromRGB(95, 110, 128)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(235, 241, 248)),
+		})
+		MainStrokeGradient.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.10),
+			NumberSequenceKeypoint.new(0.48, 0.34),
+			NumberSequenceKeypoint.new(1, 0.10),
+		})
+		StatusLabel.BackgroundColor3 = Color3.fromRGB(40, 86, 57)
+		StatusLabel.TextColor3 = Color3.fromRGB(235, 255, 241)
+	else
+		MainStrokeGradient.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+			ColorSequenceKeypoint.new(0.48, Color3.fromRGB(125, 145, 165)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 255)),
+		})
+		MainStrokeGradient.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.12),
+			NumberSequenceKeypoint.new(0.48, 0.38),
+			NumberSequenceKeypoint.new(1, 0.12),
+		})
+		StatusLabel.BackgroundColor3 = Color3.fromRGB(92, 145, 112)
+		StatusLabel.TextColor3 = Color3.fromRGB(245, 255, 248)
+	end
+
+	SessionStatusLabel.BackgroundColor3 = Theme.Surface
+	SessionStatusLabel.TextColor3 = Theme.Text
+end
+
+local DarkModeBtn = createButton("Dark Mode: OFF", SettingsPage, Theme.Surface)
+DarkModeBtn.MouseButton1Click:Connect(function()
+	local oldTheme = {}
+	for key, value in pairs(Theme) do
+		oldTheme[key] = value
+	end
+
+	DarkModeEnabled = not DarkModeEnabled
+	copyThemeValues(DarkModeEnabled and DarkTheme or LightTheme)
+	recolorByPalette(oldTheme)
+
+	DarkModeBtn.Text = "Dark Mode: " .. (DarkModeEnabled and "ON" or "OFF")
+end)
+
+-- ==========================================
+-- 🧹 MAINTENANCE
+-- ==========================================
 createSectionHeader("Maintenance", SettingsPage)
 local PurgeBtn = createButton("Reset & Purge All ESP Instances", SettingsPage, Theme.Surface)
 PurgeBtn.MouseButton1Click:Connect(function()
@@ -3254,4 +3468,4 @@ RunService.Stepped:Connect(function()
 	end
 end)
 
-print("💎 Gemini Hub V14.4 Active: Liquid Glass UI • Optimized NPC ESP • Player Warnings • Notifications ❄️💎")
+print("💎 Gemini Hub V14.7 Active: Liquid Glass UI • Waypoint Polish • Live Session • Dark Mode ❄️💎")
