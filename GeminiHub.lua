@@ -2626,15 +2626,10 @@ ViewBaselineBox.ClearTextOnFocus = false
 Instance.new("UICorner", ViewBaselineBox).CornerRadius = UDim.new(0, 8)
 
 local ApplyViewBaselineBtn = createButton("Apply", ViewBaselineFrame, Theme.Surface)
+ApplyViewBaselineBtn.TextXAlignment = Enum.TextXAlignment.Center
 ApplyViewBaselineBtn.Size = UDim2.new(0.12, 0, 0, 30)
 ApplyViewBaselineBtn.Position = UDim2.new(0.87, 0, 0, 8)
 ApplyViewBaselineBtn.TextSize = 10
-ApplyViewBaselineBtn.TextXAlignment = Enum.TextXAlignment.Center
-local ApplyViewBaselinePadding = ApplyViewBaselineBtn:FindFirstChildOfClass("UIPadding")
-if ApplyViewBaselinePadding then
-	ApplyViewBaselinePadding.PaddingLeft = UDim.new(0, 0)
-	ApplyViewBaselinePadding.PaddingRight = UDim.new(0, 0)
-end
 local ApplyViewBaselineStatus = ApplyViewBaselineBtn:FindFirstChild("StatusPill")
 if ApplyViewBaselineStatus then ApplyViewBaselineStatus.Visible = false end
 
@@ -3207,9 +3202,7 @@ local function refreshStatusIndicator()
 	local npcState = HubState.NPCToggled and "ON" or "OFF"
 	local playerState = HubState.PlayerToggled and "ON" or "OFF"
 	StatusLabel.Text = "● Gemini Hub Ready\nUI Sounds: " .. (HubState.UISoundsEnabled and "ON" or "OFF") .. "  •  Waypoints: " .. waypointMode .. "  •  Warnings: " .. warningMode .. "\nNPC ESP: " .. npcState .. "  •  Player ESP: " .. playerState .. "  •  Client-side UI"
-	StatusLabel.BackgroundColor3 = Color3.fromRGB(105, 155, 125)
-	StatusLabel.BackgroundTransparency = 0.18
-	StatusLabel.TextColor3 = Color3.fromRGB(245, 255, 248)
+	StatusLabel.TextColor3 = Color3.fromRGB(205, 245, 220)
 end
 refreshStatusIndicator()
 
