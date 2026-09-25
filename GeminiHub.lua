@@ -1,4 +1,4 @@
--- 💎 GEMINI HUB V14.3 - LIQUID GLASS + UI AUDIO + CONTROL POLISH 💎
+-- 💎 GEMINI HUB V14.7 - LIQUID GLASS + UI AUDIO + CONTROL POLISH 💎
 -- Root Cause Fixed: Restored full-spectrum rainbow pickers & shifted theme balance toward aquatic blue with green sliders! 💧🌈🌿
 
 local Players = game:GetService("Players")
@@ -1897,14 +1897,72 @@ WarningListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 WarningListLayout.Padding = UDim.new(0, 5)
 WarningListLayout.Parent = WarningListFrame
 
+-- 🌐 Roblox Presence Helper
+-- Uses Roblox's public presence endpoint through the executor HTTP bridge when available.
+local function getHttpRequestFunction()
+    return (syn and syn.request) or (http and http.request) or request or http_request or (fluxus and fluxus.request)
+end
+
+local function getRobloxOnlineStates()
+    local states = {}
+    local requestFn = getHttpRequestFunction()
+    if type(requestFn) ~= "function" then
+        return states
+    end
+
+    local userIds = {}
+    for _, username in ipairs(HubState.PlayerWarnings) do
+        local ok, userId = pcall(function()
+            return Players:GetUserIdFromNameAsync(username)
+        end)
+        if ok and userId then
+            table.insert(userIds, userId)
+        end
+    end
+
+    if #userIds == 0 then
+        return states
+    end
+
+    local ok, response = pcall(function()
+        return requestFn({
+            Url = "https://presence.roblox.com/v1/presence/users",
+            Method = "POST",
+            Headers = { ["Content-Type"] = "application/json" },
+            Body = HttpService:JSONEncode({ userIds = userIds })
+        })
+    end)
+
+    if not ok or not response or not response.Body then
+        return states
+    end
+
+    local decodedOk, decoded = pcall(function()
+        return HttpService:JSONDecode(response.Body)
+    end)
+
+    if not decodedOk or type(decoded) ~= "table" or type(decoded.userPresences) ~= "table" then
+        return states
+    end
+
+    for _, presence in ipairs(decoded.userPresences) do
+        if presence.userId then
+            states[tonumber(presence.userId)] = (tonumber(presence.userPresenceType) or 0) ~= 0
+        end
+    end
+
+    return states
+end
+
 local function refreshWarningList()
+    local robloxOnlineStates = getRobloxOnlineStates()
 	for _, child in ipairs(WarningListFrame:GetChildren()) do
 		if child:IsA("Frame") then child:Destroy() end
 	end
 	for index, username in ipairs(HubState.PlayerWarnings) do
 		local row = Instance.new("Frame")
 			row.Name = "WarningRow"
-			row.Size = UDim2.new(1, -4, 0, 30)
+			row.Size = UDim2.new(1, -4, 0, 42)
 			row.BackgroundColor3 = Theme.Surface
 			row.BackgroundTransparency = 0.38
 			row.BorderSizePixel = 0
@@ -1926,8 +1984,8 @@ local function refreshWarningList()
 			dot.Parent = row
 			Instance.new("UICorner", dot).CornerRadius = UDim.new(1,0)
 			local label = Instance.new("TextLabel")
-			label.Size = UDim2.new(1,-52,1,0)
-			label.Position = UDim2.new(0,23,0,0)
+			label.Size = UDim2.new(1,-52,0,20)
+			label.Position = UDim2.new(0,23,0,3)
 			label.BackgroundTransparency = 1
 			label.Text = username
 			label.TextColor3 = Theme.Text
@@ -1935,6 +1993,21 @@ local function refreshWarningList()
 			label.TextSize = 10
 			label.TextXAlignment = Enum.TextXAlignment.Left
 			label.Parent = row
+
+            local userIdOk, userId = pcall(function()
+                return Players:GetUserIdFromNameAsync(username)
+            end)
+            local globalOnline = userIdOk and userId and robloxOnlineStates[userId]
+            local presenceLabel = Instance.new("TextLabel")
+            presenceLabel.Size = UDim2.new(1,-52,0,15)
+            presenceLabel.Position = UDim2.new(0,23,0,22)
+            presenceLabel.BackgroundTransparency = 1
+            presenceLabel.Text = globalOnline == nil and "Roblox status unavailable" or (globalOnline and "Online on Roblox" or "Offline on Roblox")
+            presenceLabel.TextColor3 = globalOnline and Color3.fromRGB(100,205,135) or Theme.TextSecondary
+            presenceLabel.Font = Enum.Font.Gotham
+            presenceLabel.TextSize = 8
+            presenceLabel.TextXAlignment = Enum.TextXAlignment.Left
+            presenceLabel.Parent = row
 			local remove = Instance.new("TextButton")
 			remove.Size = UDim2.fromOffset(28,24)
 			remove.Position = UDim2.new(1,-32,0.5,-12)
@@ -3254,4 +3327,4 @@ RunService.Stepped:Connect(function()
 	end
 end)
 
-print("💎 Gemini Hub V14.4 Active: Liquid Glass UI • Optimized NPC ESP • Player Warnings • Notifications ❄️💎")
+print("💎 Gemini Hub V14.7 Active: Liquid Glass UI • Optimized NPC ESP • Player Warnings • Notifications ❄️💎")
