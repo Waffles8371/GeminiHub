@@ -1,7 +1,8 @@
 -- 💎 GEMINI HUB V14.5 - LIQUID GLASS 3 REDESIGN (XENO PORT) 💎
 -- Xeno-compatible build: executor GUI parent (gethui/CoreGui), getgenv state, executor filesystem persistence,
 -- and the original metatable hooks, combined with the Liquid Glass 3 UI redesign. 'LiquidGlass' tags are kept
--- on the shell/tab bar/notification cards, but the LiquidGlass module itself is NOT loaded in this build.
+-- on the shell/tab bar/notification cards, and the LiquidGlassHandler module (by @7eoeb / @UNIVERSECORNUCOPIA)
+-- is embedded near the bottom of this file, ported for Xeno.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -35,6 +36,14 @@ end
 if getgenv().GeminiKeybindConn then
 	getgenv().GeminiKeybindConn:Disconnect()
 	getgenv().GeminiKeybindConn = nil
+end
+
+-- 🫧 Remove the previous run's Liquid Glass layer (overlays, render steps, tag listeners)
+if getgenv().GeminiLiquidGlass then
+	pcall(function()
+		getgenv().GeminiLiquidGlass.Destroy()
+	end)
+	getgenv().GeminiLiquidGlass = nil
 end
 
 -- 📂 Waypoint Folder Setup
@@ -98,6 +107,20 @@ local HubState = {
 	-- UI Controls
 	UISoundsEnabled = true,
 }
+
+-- 🫧 Liquid Glass hook: tags a GuiObject and, once the handler has loaded, builds its glass overlay.
+-- Works before the handler exists too (the tag alone is picked up when the handler starts).
+HubState.LiquidGlass = nil
+function HubState.ApplyGlass(guiObject)
+	pcall(function()
+		if not CollectionService:HasTag(guiObject, "LiquidGlass") then
+			CollectionService:AddTag(guiObject, "LiquidGlass")
+		end
+		if HubState.LiquidGlass then
+			HubState.LiquidGlass.new(guiObject)
+		end
+	end)
+end
 
 -- ==========================================
 -- 💾 WAYPOINT PERSISTENCE
@@ -938,9 +961,7 @@ local function showNotification(titleText, messageText, duration)
 	card.Parent = NotificationContainer
 	-- Each notification bubble is a distinct transient panel, so apply LiquidGlass
 	-- to the card itself rather than the transparent stack container.
-	if not CollectionService:HasTag(card, "LiquidGlass") then
-		CollectionService:AddTag(card, "LiquidGlass")
-	end
+	HubState.ApplyGlass(card)
 
 	local corner = Instance.new("UICorner")
 	corner.CornerRadius = UDim.new(0, 15)
@@ -3372,16 +3393,472 @@ end)
 
 
 -- ==========================================
--- 🫧 LIQUID GLASS TAGS (module NOT loaded in this build)
+-- 🫧 LIQUID GLASS HANDLER (embedded, Xeno port)
 -- ==========================================
--- Only the CollectionService tags are applied, so a LiquidGlass module can be
--- dropped in later without touching the UI. Without the module, tags do nothing.
-for _, target in ipairs({MainFrame, TabBar}) do
-	pcall(function()
-		if not CollectionService:HasTag(target, "LiquidGlass") then
-			CollectionService:AddTag(target, "LiquidGlass")
+-- LiquidGlassHandler 1.0 by @7eoeb (scripting) and @UNIVERSECORNUCOPIA (idea/meshes).
+-- Copyright (c) 2026 @7eoeb, @UNIVERSECORNUCOPIA. All rights reserved.
+-- Original resource: https://devforum.roblox.com/t/4416219
+--
+-- This is the author's module, flattened into one function so an executor can run it
+-- (no Explorer, no ModuleScripts, no `script` object). Everything the executor needs
+-- that Studio did for free is marked [XENO PORT]. The rendering logic is the original.
+
+local function buildLiquidGlass()
+	local RunService = game:GetService("RunService")
+	local CollectionService = game:GetService("CollectionService")
+	local Players = game:GetService("Players")
+	local GuiService = game:GetService("GuiService")
+	local HttpService = game:GetService("HttpService")
+	local AssetService = game:GetService("AssetService")
+
+	-- ---------- Settings module (original values) ----------
+	local Settings = {
+		Highlight = {
+			FillColor = Color3.fromRGB(0, 0, 0),
+			OutlineTransparency = 1,
+			FillTransparency = 0.9
+		},
+		Mesh = {
+			Material = Enum.Material.Glass,
+			Color = Color3.fromRGB(0, 0, 0),
+			Transparency = 3,
+			Anchored = true,
+			CastShadow = false,
+			CanCollide = false,
+			CanTouch = false,
+			CanQuery = false,
+			AudioCanCollide = false
+		},
+		Tag = "LiquidGlass",
+		Padding = 0.001,
+		-- [XENO PORT] Nudge (in pixels) added to every glass position. If the glass sits a few
+		-- pixels off from your UI, tweak this, e.g. Vector2.new(0, -58) or Vector2.new(0, 58).
+		ExtraOffset = Vector2.new(0, 0),
+	}
+
+	-- ---------- VisibilityChecker module (original logic) ----------
+	local VisibilityChecker = {}
+
+	local function areAncestorsVisible(guiObject)
+		local current = guiObject
+		while current do
+			if current:IsA("GuiObject") and not current.Visible then
+				return false
+			elseif current:IsA("ScreenGui") and not current.Enabled then
+				return false
+			end
+			current = current.Parent
 		end
-	end)
+		return true
+	end
+
+	function VisibilityChecker.isPotentiallyVisible(guiObject)
+		if not guiObject or not guiObject.Parent then
+			return false
+		end
+		return areAncestorsVisible(guiObject)
+	end
+
+	function VisibilityChecker.getAbsoluteTransparency(guiObject)
+		local current = guiObject
+		local combinedOpacity = 1
+
+		while current do
+			if current:IsA("CanvasGroup") then
+				combinedOpacity = combinedOpacity * (1 - current.GroupTransparency)
+			end
+			current = current.Parent
+		end
+
+		return math.round((1 - combinedOpacity) * 1000) / 1000
+	end
+
+	function VisibilityChecker.getTrueRenderBounds(guiObject)
+		local absPos = guiObject.AbsolutePosition
+		local absSize = guiObject.AbsoluteSize
+		local absRot = guiObject.AbsoluteRotation
+
+		local minX, minY = absPos.X, absPos.Y
+		local maxX, maxY = absPos.X + absSize.X, absPos.Y + absSize.Y
+
+		if absRot == 0 then
+			local current = guiObject.Parent
+			while current and current:IsA("GuiObject") do
+				if current.AbsoluteRotation ~= 0 then
+					break
+				end
+
+				if current.ClipsDescendants then
+					local cPos = current.AbsolutePosition
+					local cSize = current.AbsoluteSize
+
+					minX = math.max(minX, cPos.X)
+					minY = math.max(minY, cPos.Y)
+					maxX = math.min(maxX, cPos.X + cSize.X)
+					maxY = math.min(maxY, cPos.Y + cSize.Y)
+				end
+				current = current.Parent
+			end
+		end
+
+		local width = math.max(0, maxX - minX)
+		local height = math.max(0, maxY - minY)
+
+		return {
+			Min = Vector2.new(minX, minY),
+			Max = Vector2.new(maxX, maxY),
+			Width = width,
+			Height = height,
+			IsFullyClipped = (width <= 0 or height <= 0)
+		}
+	end
+
+	-- ---------- [XENO PORT] Template meshes ----------
+	-- In Studio these 3 MeshParts sit inside the model (script.Overlay). A Lua file can't carry
+	-- MeshParts, so they are rebuilt here from the same mesh asset IDs.
+	local MESH_IDS = {
+		Edge = 71901416013578,
+		Corner = 87705720216841,
+		Center = 124254578783606,
+	}
+
+	local function createMeshPart(assetId)
+		local part = nil
+
+		-- 1) Official API (newer Content signature)
+		pcall(function()
+			part = AssetService:CreateMeshPartAsync(Content.fromAssetId(assetId))
+		end)
+		-- 2) Official API (older string signature)
+		if not part then
+			pcall(function()
+				part = AssetService:CreateMeshPartAsync("rbxassetid://" .. tostring(assetId))
+			end)
+		end
+		-- 3) Executor fallback: write MeshId directly
+		if not part then
+			local p = Instance.new("MeshPart")
+			local okSet = pcall(function()
+				p.MeshId = "rbxassetid://" .. tostring(assetId)
+			end)
+			if okSet and p.MeshId ~= "" then
+				part = p
+			else
+				p:Destroy()
+			end
+		end
+
+		return part
+	end
+
+	local templates = {}
+	for name, assetId in pairs(MESH_IDS) do
+		local part = createMeshPart(assetId)
+		if not part then
+			error("Could not create the '" .. name .. "' glass mesh (asset " .. tostring(assetId) .. "). The asset may be unavailable.")
+		end
+		part.Name = name
+		for key, value in pairs(Settings.Mesh) do
+			pcall(function()
+				part[key] = value
+			end)
+		end
+		templates[name] = part
+	end
+
+	-- ---------- LiquidGlassHandler (original logic) ----------
+	local LiquidGlassHandler = {}
+
+	local tag = Settings.Tag
+	local padding = Settings.Padding
+
+	local parentFolder = Instance.new("Folder")
+	parentFolder.Name = "LiquidGlassObjects"
+	parentFolder.Parent = workspace
+
+	local rotationOffset = CFrame.Angles(0, math.rad(-90), 0)
+
+	-- [XENO PORT] bookkeeping so the whole handler can be torn down cleanly
+	local active = {}
+	local connections = {}
+
+	-- [XENO PORT] The original only accepted UI inside the LocalPlayer (PlayerGui). An executor UI
+	-- lives in gethui()/CoreGui, so those are accepted too.
+	local function isOwnedGui(guiObject)
+		if guiObject:IsDescendantOf(Players.LocalPlayer) then
+			return true
+		end
+		local okCore, inCore = pcall(function()
+			return guiObject:IsDescendantOf(game:GetService("CoreGui"))
+		end)
+		if okCore and inCore then
+			return true
+		end
+		if type(gethui) == "function" then
+			local okHui, host = pcall(gethui)
+			if okHui and typeof(host) == "Instance" and guiObject:IsDescendantOf(host) then
+				return true
+			end
+		end
+		return false
+	end
+
+	local function createHighlight()
+		local h = Instance.new("Highlight")
+		for k, v in pairs(Settings.Highlight) do
+			h[k] = v
+		end
+		return h
+	end
+
+	function LiquidGlassHandler.new(guiObject)
+		if not guiObject or not guiObject:IsA("GuiObject") then return end
+		if active[guiObject] then return active[guiObject] end -- [XENO PORT] never build two overlays for one object
+		if not isOwnedGui(guiObject) then return end
+
+		local renderName = "LiquidGlass_" .. HttpService:GenerateGUID(false)
+
+		local container = Instance.new("Model")
+		container.Name = renderName
+		container.Parent = parentFolder
+
+		local highlight = createHighlight()
+		highlight.Parent = container
+
+		local pixels = {}
+		local lastSize = Vector2.zero
+		local lastRadius = -1
+		local currentLayoutMode = "None"
+		local depth = 2
+
+		local function getCornerRadius()
+			local currentSize = guiObject.AbsoluteSize
+			local uiCorner = guiObject:FindFirstChildWhichIsA("UICorner")
+			local radius = uiCorner and (uiCorner.CornerRadius.Offset + (uiCorner.CornerRadius.Scale * math.min(currentSize.X, currentSize.Y))) or 0
+			local maxPossibleRadius = math.min(currentSize.X, currentSize.Y) / 2
+			radius = math.clamp(radius, 0, maxPossibleRadius)
+			return radius
+		end
+
+		local function rebuildGrid()
+			local currentSize = guiObject.AbsoluteSize
+			if currentSize.X < 1 or currentSize.Y < 1 then return end
+
+			local radius = getCornerRadius()
+
+			if currentSize == lastSize and radius == lastRadius then return end
+			lastSize = currentSize
+			lastRadius = radius
+
+			local targetMode = (radius <= 0) and "Flat" or "Rounded"
+			local needsRebuild = (targetMode ~= currentLayoutMode)
+
+			if needsRebuild then
+				for _, data in pairs(pixels) do
+					data.Part:Destroy()
+				end
+				table.clear(pixels)
+				currentLayoutMode = targetMode
+			end
+
+			local partIndex = 1
+			local function updateOrAddPart(templateName, relX, relY, relSizeX, relSizeY, localRot, swapAxes)
+				if needsRebuild then
+					local p = templates[templateName]:Clone() -- [XENO PORT] was script.Overlay:FindFirstChild(name)
+					p.Parent = container
+					table.insert(pixels, {
+						Part = p,
+						RelX = relX,
+						RelY = relY,
+						RelSizeX = relSizeX,
+						RelSizeY = relSizeY,
+						LocalRot = localRot or CFrame.new(),
+						SwapAxes = swapAxes or false,
+					})
+				else
+					local data = pixels[partIndex]
+					data.RelX = relX
+					data.RelY = relY
+					data.RelSizeX = relSizeX
+					data.RelSizeY = relSizeY
+					data.LocalRot = localRot or CFrame.new()
+					data.SwapAxes = swapAxes or false
+				end
+				partIndex += 1
+			end
+
+			if radius <= 0 then
+				updateOrAddPart("Center", 0, 0, 1, 1)
+			else
+				local relRadX = radius / currentSize.X
+				local relRadY = radius / currentSize.Y
+				local innerW = (currentSize.X - 2 * radius) / currentSize.X
+				local innerH = (currentSize.Y - 2 * radius) / currentSize.Y
+				local diamX = relRadX
+				local diamY = relRadY
+
+				updateOrAddPart("Center", 0, 0, innerW, innerH)
+
+				updateOrAddPart("Edge", 0, -0.5 + (relRadY / 2), innerW, relRadY, CFrame.Angles(0, 0, 0))
+				updateOrAddPart("Edge", 0, 0.5 - (relRadY / 2), innerW, relRadY, CFrame.Angles(0, 0, math.rad(180)))
+
+				updateOrAddPart("Edge", -0.5 + (relRadX / 2), 0, relRadX, innerH, CFrame.Angles(0, 0, math.rad(90)), true)
+				updateOrAddPart("Edge", 0.5 - (relRadX / 2), 0, relRadX, innerH, CFrame.Angles(0, 0, math.rad(-90)), true)
+
+				local halfDiamX = diamX / 2
+				local halfDiamY = diamY / 2
+
+				updateOrAddPart("Corner", -0.5 + halfDiamX, -0.5 + halfDiamY, diamX, diamY, CFrame.Angles(0, 0, math.rad(90)), true)
+				updateOrAddPart("Corner", 0.5 - halfDiamX, -0.5 + halfDiamY, diamX, diamY, CFrame.Angles(0, 0, 0))
+				updateOrAddPart("Corner", -0.5 + halfDiamX, 0.5 - halfDiamY, diamX, diamY, CFrame.Angles(0, 0, math.rad(180)))
+				updateOrAddPart("Corner", 0.5 - halfDiamX, 0.5 - halfDiamY, diamX, diamY, CFrame.Angles(0, 0, math.rad(-90)), true)
+			end
+		end
+
+		rebuildGrid()
+
+		RunService:BindToRenderStep(renderName, Enum.RenderPriority.Camera.Value + 1, function()
+			local camera = workspace.CurrentCamera
+			if not camera then return end
+
+			if guiObject.AbsoluteSize ~= lastSize or getCornerRadius() ~= lastRadius then
+				rebuildGrid()
+			end
+
+			local isVisible = VisibilityChecker.isPotentiallyVisible(guiObject)
+			container.Parent = isVisible and parentFolder or nil
+			if not isVisible then return end
+
+			local visibleRect = VisibilityChecker.getTrueRenderBounds(guiObject)
+			local visibleSize = Vector2.new(visibleRect.Width, visibleRect.Height)
+
+			if visibleSize.X <= 0 or visibleSize.Y <= 0 then
+				container.Parent = nil
+				return
+			else
+				container.Parent = parentFolder
+			end
+
+			local inset, _ = GuiService:GetGuiInset()
+			local centerScreenPos = visibleRect.Min + (visibleSize / 2) + inset + Settings.ExtraOffset
+
+			local function getPlanePos(pixelX, pixelY)
+				local ray = camera:ViewportPointToRay(pixelX, pixelY)
+				local dist = depth / ray.Direction:Dot(camera:GetRenderCFrame().LookVector)
+				return ray.Origin + ray.Direction * dist
+			end
+
+			local centerWorldPos = getPlanePos(centerScreenPos.X, centerScreenPos.Y)
+			local rightEdge = getPlanePos(centerScreenPos.X + (visibleSize.X / 2), centerScreenPos.Y)
+			local leftEdge = getPlanePos(centerScreenPos.X - (visibleSize.X / 2), centerScreenPos.Y)
+			local topEdge = getPlanePos(centerScreenPos.X, centerScreenPos.Y - (visibleSize.Y / 2))
+			local bottomEdge = getPlanePos(centerScreenPos.X, centerScreenPos.Y + (visibleSize.Y / 2))
+
+			local worldW = (rightEdge - leftEdge).Magnitude
+			local worldH = (topEdge - bottomEdge).Magnitude
+
+			local camCF = camera:GetRenderCFrame()
+			local guiRotCF = CFrame.Angles(0, 0, math.rad(-guiObject.AbsoluteRotation))
+
+			local absTransparency = VisibilityChecker.getAbsoluteTransparency(guiObject)
+
+			for _, data in ipairs(pixels) do
+				local localOffset = Vector3.new(data.RelX * worldW, -data.RelY * worldH, 0)
+				local rotatedOffset = guiRotCF * localOffset
+
+				local worldOffset = (camCF.RightVector * rotatedOffset.X) + (camCF.UpVector * rotatedOffset.Y)
+
+				if data.SwapAxes then
+					data.Part.Size = Vector3.new(0.01, data.RelSizeX * worldW + padding, data.RelSizeY * worldH + padding)
+				else
+					data.Part.Size = Vector3.new(0.01, data.RelSizeY * worldH + padding, data.RelSizeX * worldW + padding)
+				end
+
+				highlight.FillTransparency = Settings.Highlight.FillTransparency + (1 - Settings.Highlight.FillTransparency) * absTransparency
+				data.Part.Transparency = Settings.Mesh.Transparency + (1 - Settings.Mesh.Transparency) * absTransparency
+
+				data.Part.CFrame = CFrame.new(centerWorldPos + worldOffset) * camCF.Rotation * guiRotCF * data.LocalRot * rotationOffset
+			end
+		end)
+
+		-- [XENO PORT] cleanup now also disconnects its own signals and guards against running twice
+		local cleaned = false
+		local ownConnections = {}
+		local handle = {}
+
+		local function cleanup()
+			if cleaned then return 1 end
+			cleaned = true
+			active[guiObject] = nil
+			for _, c in ipairs(ownConnections) do
+				pcall(function() c:Disconnect() end)
+			end
+			table.clear(ownConnections)
+			pcall(function() container:Destroy() end)
+			pcall(function() RunService:UnbindFromRenderStep(renderName) end)
+			return 1
+		end
+
+		handle.destroy = cleanup
+		active[guiObject] = handle
+
+		table.insert(ownConnections, guiObject.AncestryChanged:Connect(function(_, n)
+			if n then return end
+			cleanup()
+		end))
+
+		table.insert(ownConnections, CollectionService:GetInstanceRemovedSignal(tag):Connect(function(v)
+			if v ~= guiObject then return end
+			cleanup()
+		end))
+
+		return handle
+	end
+
+	-- [XENO PORT] Tear everything down (used when the hub is executed again).
+	function LiquidGlassHandler.Destroy()
+		for _, c in ipairs(connections) do
+			pcall(function() c:Disconnect() end)
+		end
+		table.clear(connections)
+		for _, handle in pairs(active) do
+			pcall(handle.destroy)
+		end
+		pcall(function() parentFolder:Destroy() end)
+		for _, part in pairs(templates) do
+			pcall(function() part:Destroy() end)
+		end
+	end
+
+	table.insert(connections, CollectionService:GetInstanceAddedSignal(tag):Connect(LiquidGlassHandler.new))
+	for _, v in ipairs(CollectionService:GetTagged(tag)) do
+		LiquidGlassHandler.new(v)
+	end
+
+	-- Attribution print (the original prints this whenever it runs outside Studio).
+	if not RunService:IsStudio() then
+		print(game.Name .. " is using LiquidGlassHandler by @7eoeb and @UNIVERSECORNUCOPIA. Learn more on the Developer Forum at https://devforum.roblox.com/t/4416219")
+	end
+
+	return LiquidGlassHandler
+end
+
+-- ==========================================
+-- 🫧 LIQUID GLASS LOADER
+-- ==========================================
+-- If anything goes wrong here (mesh assets unavailable, API missing...), the hub keeps working
+-- exactly as before, just without the glass layer.
+do
+	local okGlass, glassOrErr = pcall(buildLiquidGlass)
+	if okGlass and type(glassOrErr) == "table" then
+		HubState.LiquidGlass = glassOrErr
+		getgenv().GeminiLiquidGlass = glassOrErr
+		-- Shell + navigation get glass; notification cards are handled in showNotification.
+		HubState.ApplyGlass(MainFrame)
+		HubState.ApplyGlass(TabBar)
+	else
+		warn("Gemini Hub Liquid Glass: could not start (" .. tostring(glassOrErr) .. "). The hub works normally without it.")
+	end
 end
 
 -- Consistent typography: Roboto family, pure white, no text strokes.
@@ -3409,4 +3886,4 @@ ScreenGui.DescendantAdded:Connect(function(descendant)
 	applyCleanTypography(descendant)
 end)
 
-print("💎 Gemini Hub V14.5 Liquid Glass 3 UI (Xeno build) active ❄️💎")
+print("💎 Gemini Hub V14.5 Liquid Glass 3 UI (Xeno build + glass layer) active ❄️💎")
