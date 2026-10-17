@@ -1,7 +1,5 @@
--- 💎 GEMINI HUB V14.5 - LIQUID GLASS 3 (XENO PORT) 💎
--- Xeno execution/persistence/actions restored from the original executor version.
--- Liquid Glass 3 visuals and LiquidGlass tags ported from the verified Studio baseline.
--- The Glass handler module is intentionally NOT loaded in this build.
+-- 💎 GEMINI HUB V14.3 - LIQUID GLASS + UI AUDIO + CONTROL POLISH 💎
+-- Root Cause Fixed: Restored full-spectrum rainbow pickers & shifted theme balance toward aquatic blue with green sliders! 💧🌈🌿
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -382,7 +380,7 @@ end)
 ScreenGui.Parent = safeParent
 
 -- ==========================================
--- 💎 GEMINI HUB 14.0 - LIQUID GLASS THEME
+-- 💎 GEMINI HUB V14.5 - LIQUID GLASS 3 THEME
 -- ==========================================
 
 local Theme = {
@@ -443,8 +441,6 @@ local TweenSoft = TweenInfo.new(
 -- 🔊 UI SOUND SYSTEM
 -- ==========================================
 -- Short 2D UI sounds are parented to SoundService so they are not positional.
-local oldAudio = SoundService:FindFirstChild("GeminiHub_UIAudio")
-if oldAudio then oldAudio:Destroy() end
 local GeminiHubAudio = Instance.new("Folder")
 GeminiHubAudio.Name = "GeminiHub_UIAudio"
 GeminiHubAudio.Parent = SoundService
@@ -720,7 +716,7 @@ local Version = Instance.new("TextLabel")
 Version.Size = UDim2.new(1, -80, 0, 16)
 Version.Position = UDim2.new(0, 20, 0, 31)
 Version.BackgroundTransparency = 1
-Version.Text = "v14.1"
+Version.Text = "v14.5 XENO"
 Version.TextColor3 = Theme.TextSecondary
 Version.FontFace = ROBOTO_REGULAR
 Version.TextSize = 10
@@ -759,17 +755,17 @@ MinMaxScale.Parent = MinMaxBtn
 local function pressMinMaxButton()
 	TweenService:Create(MinMaxScale, TweenFast, {Scale = 1.035}):Play()
 	TweenService:Create(MinMaxBtn, TweenFast, {
-		BackgroundTransparency = 0,
-		BackgroundColor3 = Theme.White,
-		TextColor3 = Theme.Accent,
+		BackgroundTransparency = 0.12,
+		BackgroundColor3 = Theme.SurfaceHover,
+		TextColor3 = Theme.Text,
 	}):Play()
 end
 
 local function releaseMinMaxButton()
 	TweenService:Create(MinMaxScale, TweenFast, {Scale = 1}):Play()
 	TweenService:Create(MinMaxBtn, TweenFast, {
-		BackgroundTransparency = 0.55,
-		BackgroundColor3 = Theme.White,
+		BackgroundTransparency = 0.42,
+		BackgroundColor3 = Theme.Surface,
 		TextColor3 = Theme.Text,
 	}):Play()
 end
@@ -829,8 +825,8 @@ MinMaxBtn.MouseEnter:Connect(function()
 		MinMaxBtn,
 		TweenFast,
 		{
-			BackgroundTransparency = 0.25,
-			TextColor3 = Theme.Accent,
+			BackgroundTransparency = 0.24,
+			TextColor3 = Theme.Text,
 		}
 	):Play()
 end)
@@ -840,7 +836,7 @@ MinMaxBtn.MouseLeave:Connect(function()
 		MinMaxBtn,
 		TweenFast,
 		{
-			BackgroundTransparency = 0.55,
+			BackgroundTransparency = 0.42,
 			TextColor3 = Theme.Text,
 		}
 	):Play()
@@ -1158,7 +1154,7 @@ end
 
 local function setTabVisual(btn, active, instant)
 	local targetBackground = active and 1 or 0.92
-	local targetText = active and Theme.Accent or Theme.TextSecondary
+	local targetText = active and Theme.Text or Theme.TextSecondary
 
 	if instant then
 		btn.BackgroundTransparency = targetBackground
@@ -3132,7 +3128,6 @@ HoverText.TextColor3 = Color3.fromRGB(255, 255, 255)
 HoverText.FontFace = ROBOTO_BOLD
 HoverText.TextSize = 14
 HoverText.TextStrokeTransparency = 1
-HoverText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 HoverText.TextXAlignment = Enum.TextXAlignment.Center
 
 HoverToggleBtn.MouseButton1Click:Connect(function()
@@ -3399,4 +3394,4 @@ ScreenGui.DescendantAdded:Connect(function(descendant)
 	applyCleanTypography(descendant)
 end)
 
-print("💎 Gemini Hub V14.5 Liquid Glass 3 Xeno port active • executor persistence/actions retained • LiquidGlass tags only ❄️💎")
+print("💎 Gemini Hub V14.4 Active: Liquid Glass UI • Optimized NPC ESP • Player Warnings • Notifications ❄️💎")
