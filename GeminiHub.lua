@@ -1,5 +1,7 @@
--- 💎 GEMINI HUB V14.3 - LIQUID GLASS + UI AUDIO + CONTROL POLISH 💎
--- Root Cause Fixed: Restored full-spectrum rainbow pickers & shifted theme balance toward aquatic blue with green sliders! 💧🌈🌿
+-- 💎 GEMINI HUB V14.5 - LIQUID GLASS 3 REDESIGN (XENO PORT) 💎
+-- Xeno-compatible build: executor GUI parent (gethui/CoreGui), getgenv state, executor filesystem persistence,
+-- and the original metatable hooks, combined with the Liquid Glass 3 UI redesign. 'LiquidGlass' tags are kept
+-- on the shell/tab bar/notification cards, but the LiquidGlass module itself is NOT loaded in this build.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -11,14 +13,6 @@ local SoundService = game:GetService("SoundService")
 local HttpService = game:GetService("HttpService")
 local CollectionService = game:GetService("CollectionService")
 local LocalPlayer = Players.LocalPlayer
-
--- Liquid Glass integration is intentionally deferred: this port registers the tags
--- now, but does not load the handler module until a later integration pass.
-local function tagLiquidGlass(instance)
-    if instance and not CollectionService:HasTag(instance, "LiquidGlass") then
-        CollectionService:AddTag(instance, "LiquidGlass")
-    end
-end
 
 -- 🛡️ Safe GUI Parent Finder
 local function getSafeParent()
@@ -380,7 +374,7 @@ end)
 ScreenGui.Parent = safeParent
 
 -- ==========================================
--- 💎 GEMINI HUB V14.5 - LIQUID GLASS 3 THEME
+-- 💎 GEMINI HUB 14.0 - LIQUID GLASS THEME
 -- ==========================================
 
 local Theme = {
@@ -408,8 +402,8 @@ local Theme = {
 	White = Color3.fromRGB(248, 250, 255),
 	Track = Color3.fromRGB(92, 103, 118),
 
-	-- Keep this translucency tuned for the smoke-glass style. The external
-	-- LiquidGlass handler is intentionally not loaded in this Xeno build.
+	-- The main surface already has the LiquidGlass module attached; keep its
+	-- transparency level rather than piling on extra opacity or extra effects.
 	PanelTransparency = 0.42,
 	SurfaceTransparency = 0.46,
 	BorderTransparency = 0.56,
@@ -441,6 +435,8 @@ local TweenSoft = TweenInfo.new(
 -- 🔊 UI SOUND SYSTEM
 -- ==========================================
 -- Short 2D UI sounds are parented to SoundService so they are not positional.
+local oldAudio = SoundService:FindFirstChild("GeminiHub_UIAudio")
+if oldAudio then oldAudio:Destroy() end
 local GeminiHubAudio = Instance.new("Folder")
 GeminiHubAudio.Name = "GeminiHub_UIAudio"
 GeminiHubAudio.Parent = SoundService
@@ -521,7 +517,6 @@ MainFrame.BackgroundTransparency = Theme.PanelTransparency
 MainFrame.BorderSizePixel = 0
 MainFrame.ClipsDescendants = true
 MainFrame.Parent = ScreenGui
-tagLiquidGlass(MainFrame)
 
 -- 📱 Responsive shell: desktop keeps the original compact size, while touch
 -- devices use a percentage-based footprint so the hub does not swallow the screen.
@@ -573,7 +568,7 @@ local MainStrokeGradient = Instance.new("UIGradient")
 MainStrokeGradient.Name = "GlassHighlightGradient"
 MainStrokeGradient.Color = ColorSequence.new({
 	ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
-	ColorSequenceKeypoint.new(0.48, Color3.fromRGB(125, 145, 165)),
+	ColorSequenceKeypoint.new(0.48, Color3.fromRGB(115, 132, 151)),
 	ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 255)),
 })
 MainStrokeGradient.Transparency = NumberSequence.new({
@@ -941,7 +936,11 @@ local function showNotification(titleText, messageText, duration)
 	card.ClipsDescendants = true
 	card.ZIndex = 51
 	card.Parent = NotificationContainer
-	tagLiquidGlass(card)
+	-- Each notification bubble is a distinct transient panel, so apply LiquidGlass
+	-- to the card itself rather than the transparent stack container.
+	if not CollectionService:HasTag(card, "LiquidGlass") then
+		CollectionService:AddTag(card, "LiquidGlass")
+	end
 
 	local corner = Instance.new("UICorner")
 	corner.CornerRadius = UDim.new(0, 15)
@@ -1040,7 +1039,6 @@ TabBar.BackgroundTransparency = 0.52
 TabBar.BorderSizePixel = 0
 TabBar.ZIndex = 5
 TabBar.Parent = MainFrame
-tagLiquidGlass(TabBar)
 
 local TabCorner = Instance.new("UICorner")
 TabCorner.CornerRadius = UDim.new(0, 14)
@@ -1948,12 +1946,12 @@ end
 -- 💠 CREATE TABS
 -- ==========================================
 
-local ESPPage = createTab("ESP", Theme.AccentSoft)
-local WaypointPage = createTab("Pins", Theme.AccentSoft)
-local WarningPage = createTab("Warnings", Theme.AccentSoft)
-local SpeedPage = createTab("Speed", Theme.AccentSoft)
-local OthersPage = createTab("Others", Theme.AccentSoft)
-local SettingsPage = createTab("Config", Theme.AccentSoft)
+HubState.ESPPage = createTab("ESP", Theme.AccentSoft)
+HubState.WaypointPage = createTab("Pins", Theme.AccentSoft)
+HubState.WarningPage = createTab("Warnings", Theme.AccentSoft)
+HubState.SpeedPage = createTab("Speed", Theme.AccentSoft)
+HubState.OthersPage = createTab("Others", Theme.AccentSoft)
+HubState.SettingsPage = createTab("Config", Theme.AccentSoft)
 
 Containers["ESP"].Page.Visible = true
 setTabVisual(Containers["ESP"].Button, true, true)
@@ -1961,62 +1959,62 @@ setTabVisual(Containers["ESP"].Button, true, true)
 -- ==========================================
 -- ⚠️ PLAYER WARNING UI & JOIN DETECTION
 -- ==========================================
-createSectionHeader("Watched Players", WarningPage)
+createSectionHeader("Watched Players", HubState.WarningPage)
 
-local WarningNameBox = Instance.new("TextBox")
-WarningNameBox.Size = UDim2.new(1, 0, 0, 36)
-WarningNameBox.BackgroundColor3 = Theme.Surface
-WarningNameBox.BackgroundTransparency = 0.42
-WarningNameBox.PlaceholderText = "Enter Roblox username..."
-WarningNameBox.PlaceholderColor3 = Theme.TextSecondary
-WarningNameBox.Text = ""
-WarningNameBox.TextColor3 = Theme.Text
-WarningNameBox.FontFace = ROBOTO_REGULAR
-WarningNameBox.TextSize = 11
-WarningNameBox.ClearTextOnFocus = false
-WarningNameBox.Parent = WarningPage
-Instance.new("UICorner", WarningNameBox).CornerRadius = UDim.new(0, 10)
-local warningBoxPadding = Instance.new("UIPadding")
-warningBoxPadding.PaddingLeft = UDim.new(0, 12)
-warningBoxPadding.PaddingRight = UDim.new(0, 12)
-warningBoxPadding.Parent = WarningNameBox
-local warningBoxStroke = Instance.new("UIStroke")
-warningBoxStroke.Color = Theme.White
-warningBoxStroke.Transparency = 0.50
-warningBoxStroke.Thickness = 1
-warningBoxStroke.Parent = WarningNameBox
+HubState.WarningNameBox = Instance.new("TextBox")
+HubState.WarningNameBox.Size = UDim2.new(1, 0, 0, 36)
+HubState.WarningNameBox.BackgroundColor3 = Theme.Surface
+HubState.WarningNameBox.BackgroundTransparency = 0.42
+HubState.WarningNameBox.PlaceholderText = "Enter Roblox username..."
+HubState.WarningNameBox.PlaceholderColor3 = Theme.TextSecondary
+HubState.WarningNameBox.Text = ""
+HubState.WarningNameBox.TextColor3 = Theme.Text
+HubState.WarningNameBox.FontFace = ROBOTO_REGULAR
+HubState.WarningNameBox.TextSize = 11
+HubState.WarningNameBox.ClearTextOnFocus = false
+HubState.WarningNameBox.Parent = HubState.WarningPage
+Instance.new("UICorner", HubState.WarningNameBox).CornerRadius = UDim.new(0, 10)
+HubState.warningBoxPadding = Instance.new("UIPadding")
+HubState.warningBoxPadding.PaddingLeft = UDim.new(0, 12)
+HubState.warningBoxPadding.PaddingRight = UDim.new(0, 12)
+HubState.warningBoxPadding.Parent = HubState.WarningNameBox
+HubState.warningBoxStroke = Instance.new("UIStroke")
+HubState.warningBoxStroke.Color = Theme.White
+HubState.warningBoxStroke.Transparency = 0.50
+HubState.warningBoxStroke.Thickness = 1
+HubState.warningBoxStroke.Parent = HubState.WarningNameBox
 
-local AddWarningBtn = createButton("Add Player Warning", WarningPage, Theme.Surface)
-local WarningStatusLabel = Instance.new("TextLabel")
-WarningStatusLabel.Size = UDim2.new(1, 0, 0, 18)
-WarningStatusLabel.BackgroundTransparency = 1
-WarningStatusLabel.Text = "Saved warnings: 0  •  " .. WarningPersistenceMode
-WarningStatusLabel.TextColor3 = Theme.TextSecondary
-WarningStatusLabel.FontFace = ROBOTO_REGULAR
-WarningStatusLabel.TextSize = 9
-WarningStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
-WarningStatusLabel.Parent = WarningPage
+HubState.AddWarningBtn = createButton("Add Player Warning", HubState.WarningPage, Theme.Surface)
+HubState.WarningStatusLabel = Instance.new("TextLabel")
+HubState.WarningStatusLabel.Size = UDim2.new(1, 0, 0, 18)
+HubState.WarningStatusLabel.BackgroundTransparency = 1
+HubState.WarningStatusLabel.Text = "Saved warnings: 0  •  " .. WarningPersistenceMode
+HubState.WarningStatusLabel.TextColor3 = Theme.TextSecondary
+HubState.WarningStatusLabel.FontFace = ROBOTO_REGULAR
+HubState.WarningStatusLabel.TextSize = 9
+HubState.WarningStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+HubState.WarningStatusLabel.Parent = HubState.WarningPage
 
-local CheckServerWarningsBtn = createButton("Check Watched Players In Server", WarningPage, Theme.Surface)
+HubState.CheckServerWarningsBtn = createButton("Check Watched Players In Server", HubState.WarningPage, Theme.Surface)
 
-local WarningListFrame = Instance.new("ScrollingFrame")
-WarningListFrame.Size = UDim2.new(1, 0, 0, 170)
-WarningListFrame.BackgroundTransparency = 1
-WarningListFrame.BorderSizePixel = 0
-WarningListFrame.ScrollBarThickness = 2
-WarningListFrame.ScrollBarImageColor3 = Theme.Accent
-WarningListFrame.ScrollBarImageTransparency = 0.55
-WarningListFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
-WarningListFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-WarningListFrame.Parent = WarningPage
+HubState.WarningListFrame = Instance.new("ScrollingFrame")
+HubState.WarningListFrame.Size = UDim2.new(1, 0, 0, 170)
+HubState.WarningListFrame.BackgroundTransparency = 1
+HubState.WarningListFrame.BorderSizePixel = 0
+HubState.WarningListFrame.ScrollBarThickness = 2
+HubState.WarningListFrame.ScrollBarImageColor3 = Theme.Accent
+HubState.WarningListFrame.ScrollBarImageTransparency = 0.55
+HubState.WarningListFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+HubState.WarningListFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+HubState.WarningListFrame.Parent = HubState.WarningPage
 
-local WarningListLayout = Instance.new("UIListLayout")
-WarningListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-WarningListLayout.Padding = UDim.new(0, 5)
-WarningListLayout.Parent = WarningListFrame
+HubState.WarningListLayout = Instance.new("UIListLayout")
+HubState.WarningListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+HubState.WarningListLayout.Padding = UDim.new(0, 5)
+HubState.WarningListLayout.Parent = HubState.WarningListFrame
 
 local function refreshWarningList()
-	for _, child in ipairs(WarningListFrame:GetChildren()) do
+	for _, child in ipairs(HubState.WarningListFrame:GetChildren()) do
 		if child:IsA("Frame") then child:Destroy() end
 	end
 	for index, username in ipairs(HubState.PlayerWarnings) do
@@ -2027,7 +2025,7 @@ local function refreshWarningList()
 			row.BackgroundTransparency = 0.38
 			row.BorderSizePixel = 0
 			row.LayoutOrder = index
-			row.Parent = WarningListFrame
+			row.Parent = HubState.WarningListFrame
 			Instance.new("UICorner", row).CornerRadius = UDim.new(0, 9)
 			local dot = Instance.new("Frame")
 			dot.Size = UDim2.fromOffset(7,7)
@@ -2071,7 +2069,7 @@ local function refreshWarningList()
 				end
 			end)
 	end
-	WarningStatusLabel.Text = "Saved warnings: " .. tostring(#HubState.PlayerWarnings) .. "  •  " .. WarningPersistenceMode
+	HubState.WarningStatusLabel.Text = "Saved warnings: " .. tostring(#HubState.PlayerWarnings) .. "  •  " .. WarningPersistenceMode
 end
 
 local function checkWatchedPlayersInServer()
@@ -2089,15 +2087,15 @@ local function checkWatchedPlayersInServer()
 
 	if #found == 0 then
 		showNotification("Player Warning", "None of your watched players are currently in this server.", 3.5)
-		WarningStatusLabel.Text = "Saved warnings: " .. tostring(#HubState.PlayerWarnings) .. "  •  " .. WarningPersistenceMode .. "  •  None found in server"
+		HubState.WarningStatusLabel.Text = "Saved warnings: " .. tostring(#HubState.PlayerWarnings) .. "  •  " .. WarningPersistenceMode .. "  •  None found in server"
 	else
 		local shown = table.concat(found, ", ")
 		showNotification("⚠ Watched Player Found", "In this server: " .. shown, 6)
-		WarningStatusLabel.Text = "Saved warnings: " .. tostring(#HubState.PlayerWarnings) .. "  •  " .. WarningPersistenceMode .. "  •  Found: " .. shown
+		HubState.WarningStatusLabel.Text = "Saved warnings: " .. tostring(#HubState.PlayerWarnings) .. "  •  " .. WarningPersistenceMode .. "  •  Found: " .. shown
 	end
 end
 
-CheckServerWarningsBtn.MouseButton1Click:Connect(checkWatchedPlayersInServer)
+HubState.CheckServerWarningsBtn.MouseButton1Click:Connect(checkWatchedPlayersInServer)
 Players.PlayerAdded:Connect(function()
 	task.defer(refreshWarningList)
 end)
@@ -2122,17 +2120,17 @@ local function addPlayerWarning(username)
 	table.insert(HubState.PlayerWarnings, username)
 	savePlayerWarnings()
 	refreshWarningList()
-	WarningNameBox.Text = ""
+	HubState.WarningNameBox.Text = ""
 	showNotification("Player Warning", "Now watching " .. username .. ".", 2.5)
 end
 
-AddWarningBtn.MouseButton1Click:Connect(function()
-	addPlayerWarning(WarningNameBox.Text)
+HubState.AddWarningBtn.MouseButton1Click:Connect(function()
+	addPlayerWarning(HubState.WarningNameBox.Text)
 end)
 
-WarningNameBox.FocusLost:Connect(function(enterPressed)
+HubState.WarningNameBox.FocusLost:Connect(function(enterPressed)
 	if enterPressed then
-		addPlayerWarning(WarningNameBox.Text)
+		addPlayerWarning(HubState.WarningNameBox.Text)
 	end
 end)
 
@@ -2183,9 +2181,9 @@ local function applyHealthBar(character, humanoid, tagPrefix, alwaysOnTop)
 
 	local bgGradient = Instance.new("UIGradient")
 	bgGradient.Color = ColorSequence.new({
-		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
-		ColorSequenceKeypoint.new(0.5, Color3.fromRGB(235, 242, 248)),
-		ColorSequenceKeypoint.new(1, Color3.fromRGB(210, 222, 235)),
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(61, 72, 85)),
+		ColorSequenceKeypoint.new(0.5, Color3.fromRGB(38, 47, 59)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(27, 34, 44)),
 	})
 	bgGradient.Rotation = 90
 	bgGradient.Parent = bg
@@ -2256,22 +2254,22 @@ end
 -- ==========================================
 -- 🤖 SECTION 1: NPC & PLAYER ESP LOGIC
 -- ==========================================
-createSectionHeader("NPCs", ESPPage)
-local NPCToggleBtn = createButton("Toggle NPC ESP: OFF", ESPPage, Theme.Surface)
-local NPCUpdateBtn = createButton("Refresh Scan NPCs", ESPPage, Color3.fromRGB(215, 235, 255))
+createSectionHeader("NPCs", HubState.ESPPage)
+HubState.NPCToggleBtn = createButton("Toggle NPC ESP: OFF", HubState.ESPPage, Theme.Surface)
+HubState.NPCUpdateBtn = createButton("Refresh Scan NPCs", HubState.ESPPage, Color3.fromRGB(215, 235, 255))
 
-local NPCHighlights = {}
-local NPCHealthBars = {}
+HubState.NPCHighlights = {}
+HubState.NPCHealthBars = {}
 local NPCDescendantConnection
 
 local function clearNPCESP()
-	for model, highlight in pairs(NPCHighlights) do
+	for model, highlight in pairs(HubState.NPCHighlights) do
 		if highlight and highlight.Parent then highlight:Destroy() end
-		NPCHighlights[model] = nil
+		HubState.NPCHighlights[model] = nil
 	end
-	for model, bar in pairs(NPCHealthBars) do
+	for model, bar in pairs(HubState.NPCHealthBars) do
 		if bar and bar.Parent then bar:Destroy() end
-		NPCHealthBars[model] = nil
+		HubState.NPCHealthBars[model] = nil
 	end
 	-- Clean up legacy instances that may have been created by an older run.
 	for _, v in pairs(Workspace:GetDescendants()) do
@@ -2280,16 +2278,16 @@ local function clearNPCESP()
 	end
 end
 
-createSlider("NPC Fill Transparency", HubState.NPCFill, 0, 1, ESPPage, function(val)
+createSlider("NPC Fill Transparency", HubState.NPCFill, 0, 1, HubState.ESPPage, function(val)
 	HubState.NPCFill = val
-	for _, highlight in pairs(NPCHighlights) do
+	for _, highlight in pairs(HubState.NPCHighlights) do
 		if highlight and highlight.Parent then highlight.FillTransparency = val end
 	end
 end)
 
-createSlider("NPC Outline Transparency", HubState.NPCOutline, 0, 1, ESPPage, function(val)
+createSlider("NPC Outline Transparency", HubState.NPCOutline, 0, 1, HubState.ESPPage, function(val)
 	HubState.NPCOutline = val
-	for _, highlight in pairs(NPCHighlights) do
+	for _, highlight in pairs(HubState.NPCHighlights) do
 		if highlight and highlight.Parent then highlight.OutlineTransparency = val end
 	end
 end)
@@ -2304,7 +2302,7 @@ local function applyNPC(model)
 	if existing and existing:IsA("Highlight") then
 		existing.FillTransparency = HubState.NPCFill
 		existing.OutlineTransparency = HubState.NPCOutline
-		NPCHighlights[model] = existing
+		HubState.NPCHighlights[model] = existing
 	else
 		local h = Instance.new("Highlight")
 		h.Name = "NPC_HIGHLIGHT"
@@ -2313,14 +2311,14 @@ local function applyNPC(model)
 		h.OutlineColor = Color3.fromRGB(150, 200, 240)
 		h.OutlineTransparency = HubState.NPCOutline
 		h.Parent = model
-		NPCHighlights[model] = h
+		HubState.NPCHighlights[model] = h
 	end
 
 	local root = model:FindFirstChild("HumanoidRootPart") or model:FindFirstChild("Head") or model:FindFirstChildWhichIsA("BasePart")
 	local oldBar = root and root:FindFirstChild("NPC_HEALTH_BAR")
 	if oldBar then oldBar:Destroy() end
 	applyHealthBar(model, humanoid, "NPC", false)
-	if root then NPCHealthBars[model] = root:FindFirstChild("NPC_HEALTH_BAR") end
+	if root then HubState.NPCHealthBars[model] = root:FindFirstChild("NPC_HEALTH_BAR") end
 end
 
 local function scanNPCsOnce()
@@ -2354,9 +2352,9 @@ local function stopNPCWatcher()
 	end
 end
 
-NPCToggleBtn.MouseButton1Click:Connect(function()
+HubState.NPCToggleBtn.MouseButton1Click:Connect(function()
 	HubState.NPCToggled = not HubState.NPCToggled
-	NPCToggleBtn.Text = "Toggle NPC ESP: " .. (HubState.NPCToggled and "ON" or "OFF")
+	HubState.NPCToggleBtn.Text = "Toggle NPC ESP: " .. (HubState.NPCToggled and "ON" or "OFF")
 	if HubState.NPCToggled then
 		scanNPCsOnce()
 		startNPCWatcher()
@@ -2366,16 +2364,16 @@ NPCToggleBtn.MouseButton1Click:Connect(function()
 	end
 end)
 
-NPCUpdateBtn.MouseButton1Click:Connect(function()
+HubState.NPCUpdateBtn.MouseButton1Click:Connect(function()
 	-- Refresh is now the expensive Workspace scan. Normal runtime is event-driven.
 	scanNPCsOnce()
 	if HubState.NPCToggled then startNPCWatcher() end
 end)
 
-createSectionHeader("Players", ESPPage)
-local PlayerToggleBtn = createButton("Toggle Player ESP: OFF", ESPPage, Theme.Surface)
+createSectionHeader("Players", HubState.ESPPage)
+HubState.PlayerToggleBtn = createButton("Toggle Player ESP: OFF", HubState.ESPPage, Theme.Surface)
 
-createSlider("Player Fill Transparency", HubState.PlayerFill, 0, 1, ESPPage, function(val) 
+createSlider("Player Fill Transparency", HubState.PlayerFill, 0, 1, HubState.ESPPage, function(val) 
 	HubState.PlayerFill = val 
 	for _, v in pairs(Players:GetPlayers()) do
 		if v.Character and v.Character:FindFirstChild("PLAYER_HIGHLIGHT") then
@@ -2384,7 +2382,7 @@ createSlider("Player Fill Transparency", HubState.PlayerFill, 0, 1, ESPPage, fun
 	end
 end)
 
-createSlider("Player Outline", HubState.PlayerOutline, 0, 1, ESPPage, function(val) 
+createSlider("Player Outline", HubState.PlayerOutline, 0, 1, HubState.ESPPage, function(val) 
 	HubState.PlayerOutline = val 
 	for _, v in pairs(Players:GetPlayers()) do
 		if v.Character and v.Character:FindFirstChild("PLAYER_HIGHLIGHT") then
@@ -2393,8 +2391,8 @@ createSlider("Player Outline", HubState.PlayerOutline, 0, 1, ESPPage, function(v
 	end
 end)
 
-createSectionHeader("Highlight", ESPPage)
-create2DColorPicker("Player Highlight Color", HubState.PlayerColor, ESPPage, function(newColor)
+createSectionHeader("Highlight", HubState.ESPPage)
+create2DColorPicker("Player Highlight Color", HubState.PlayerColor, HubState.ESPPage, function(newColor)
 	HubState.PlayerColor = newColor
 	for _, plr in pairs(Players:GetPlayers()) do
 		if plr.Character then
@@ -2455,25 +2453,25 @@ end
 for _, plr in pairs(Players:GetPlayers()) do setupPlayerListeners(plr) end
 Players.PlayerAdded:Connect(setupPlayerListeners)
 
-PlayerToggleBtn.MouseButton1Click:Connect(function()
+HubState.PlayerToggleBtn.MouseButton1Click:Connect(function()
 	HubState.PlayerToggled = not HubState.PlayerToggled
-	PlayerToggleBtn.Text = "Toggle Player ESP: " .. (HubState.PlayerToggled and "ON" or "OFF")
+	HubState.PlayerToggleBtn.Text = "Toggle Player ESP: " .. (HubState.PlayerToggled and "ON" or "OFF")
 	for _, plr in pairs(Players:GetPlayers()) do updateSinglePlayer(plr) end
 end)
 
 -- ==========================================
 -- 🧹 ESP CLEANUP MANAGER
 -- ==========================================
-createSectionHeader("ESP Cleanup", ESPPage)
-local ESPCleanupStatus = Instance.new("TextLabel")
-ESPCleanupStatus.Size = UDim2.new(1, 0, 0, 18)
-ESPCleanupStatus.BackgroundTransparency = 1
-ESPCleanupStatus.Text = "Scans for stale Gemini ESP instances only."
-ESPCleanupStatus.TextColor3 = Theme.TextSecondary
-ESPCleanupStatus.FontFace = ROBOTO_REGULAR
-ESPCleanupStatus.TextSize = 9
-ESPCleanupStatus.TextXAlignment = Enum.TextXAlignment.Left
-ESPCleanupStatus.Parent = ESPPage
+createSectionHeader("ESP Cleanup", HubState.ESPPage)
+HubState.ESPCleanupStatus = Instance.new("TextLabel")
+HubState.ESPCleanupStatus.Size = UDim2.new(1, 0, 0, 18)
+HubState.ESPCleanupStatus.BackgroundTransparency = 1
+HubState.ESPCleanupStatus.Text = "Scans for stale Gemini ESP instances only."
+HubState.ESPCleanupStatus.TextColor3 = Theme.TextSecondary
+HubState.ESPCleanupStatus.FontFace = ROBOTO_REGULAR
+HubState.ESPCleanupStatus.TextSize = 9
+HubState.ESPCleanupStatus.TextXAlignment = Enum.TextXAlignment.Left
+HubState.ESPCleanupStatus.Parent = HubState.ESPPage
 
 local function cleanupESPInstances()
 	local removed = 0
@@ -2481,7 +2479,7 @@ local function cleanupESPInstances()
 		local stale = false
 		if v:IsA("Highlight") and v.Name == "NPC_HIGHLIGHT" then
 			local model = v.Parent
-			stale = (not HubState.NPCToggled) or (not model) or (NPCHighlights[model] ~= v) or (not model:IsDescendantOf(Workspace))
+			stale = (not HubState.NPCToggled) or (not model) or (HubState.NPCHighlights[model] ~= v) or (not model:IsDescendantOf(Workspace))
 		elseif v:IsA("Highlight") and v.Name == "PLAYER_HIGHLIGHT" then
 			local owner = v.Parent and Players:GetPlayerFromCharacter(v.Parent)
 			stale = (not HubState.PlayerToggled) or (not owner) or owner == LocalPlayer or owner.Character ~= v.Parent
@@ -2491,7 +2489,7 @@ local function cleanupESPInstances()
 			stale = (not HubState.HoverToggled) or (not v.Adornee) or (not v.Adornee:IsDescendantOf(Workspace))
 		elseif v:IsA("BillboardGui") and string.find(v.Name, "NPC_HEALTH_BAR") then
 			local model = v.Adornee and v.Adornee:FindFirstAncestorOfClass("Model")
-			stale = (not HubState.NPCToggled) or (not model) or (NPCHealthBars[model] ~= v)
+			stale = (not HubState.NPCToggled) or (not model) or (HubState.NPCHealthBars[model] ~= v)
 		elseif v:IsA("BillboardGui") and string.find(v.Name, "PLAYER_HEALTH_BAR") then
 			local model = v.Adornee and v.Adornee:FindFirstAncestorOfClass("Model")
 			local owner = model and Players:GetPlayerFromCharacter(model)
@@ -2504,58 +2502,58 @@ local function cleanupESPInstances()
 			removed += 1
 		end
 	end
-	ESPCleanupStatus.Text = "Cleaned " .. tostring(removed) .. " stale ESP instance" .. (removed == 1 and "" or "s") .. "."
+	HubState.ESPCleanupStatus.Text = "Cleaned " .. tostring(removed) .. " stale ESP instance" .. (removed == 1 and "" or "s") .. "."
 	return removed
 end
 
-local ESPCleanupBtn = createButton("Clean Stale ESP Instances", ESPPage, Theme.Surface)
-ESPCleanupBtn.MouseButton1Click:Connect(cleanupESPInstances)
+HubState.ESPCleanupBtn = createButton("Clean Stale ESP Instances", HubState.ESPPage, Theme.Surface)
+HubState.ESPCleanupBtn.MouseButton1Click:Connect(cleanupESPInstances)
 
 -- ==========================================
 -- 📍 SECTION 2: WAYPOINT MANAGEMENT
 -- ==========================================
 loadWaypoints()
 
-createSectionHeader("Waypoint Manager", WaypointPage)
-create2DColorPicker("Waypoint Pin Color", HubState.WaypointColor, WaypointPage, function(newColor)
+createSectionHeader("Waypoint Manager", HubState.WaypointPage)
+create2DColorPicker("Waypoint Pin Color", HubState.WaypointColor, HubState.WaypointPage, function(newColor)
 	HubState.WaypointColor = newColor
 	saveWaypoints()
 end)
 
-local WaypointNameBox = Instance.new("TextBox", WaypointPage)
-WaypointNameBox.Size = UDim2.new(1, 0, 0, 36)
-WaypointNameBox.BackgroundColor3 = Theme.Surface
-WaypointNameBox.BackgroundTransparency = 0.42
-WaypointNameBox.PlaceholderText = "Enter Waypoint Name..."
-WaypointNameBox.PlaceholderColor3 = Theme.TextSecondary
-WaypointNameBox.Text = ""
-WaypointNameBox.TextColor3 = Theme.Text
-WaypointNameBox.FontFace = ROBOTO_REGULAR
-WaypointNameBox.TextSize = 11
-Instance.new("UICorner", WaypointNameBox).CornerRadius = UDim.new(0, 10)
-local wpBoxStroke = Instance.new("UIStroke", WaypointNameBox)
-wpBoxStroke.Color = Theme.White
-wpBoxStroke.Transparency = 0.50
-wpBoxStroke.Thickness = 1
+HubState.WaypointNameBox = Instance.new("TextBox", HubState.WaypointPage)
+HubState.WaypointNameBox.Size = UDim2.new(1, 0, 0, 36)
+HubState.WaypointNameBox.BackgroundColor3 = Theme.Surface
+HubState.WaypointNameBox.BackgroundTransparency = 0.42
+HubState.WaypointNameBox.PlaceholderText = "Enter Waypoint Name..."
+HubState.WaypointNameBox.PlaceholderColor3 = Theme.TextSecondary
+HubState.WaypointNameBox.Text = ""
+HubState.WaypointNameBox.TextColor3 = Theme.Text
+HubState.WaypointNameBox.FontFace = ROBOTO_REGULAR
+HubState.WaypointNameBox.TextSize = 11
+Instance.new("UICorner", HubState.WaypointNameBox).CornerRadius = UDim.new(0, 10)
+HubState.wpBoxStroke = Instance.new("UIStroke", HubState.WaypointNameBox)
+HubState.wpBoxStroke.Color = Theme.White
+HubState.wpBoxStroke.Transparency = 0.50
+HubState.wpBoxStroke.Thickness = 1
 
-local CreateWaypointBtn = createButton("Create Waypoint Here", WaypointPage, Color3.fromRGB(210, 235, 255))
+HubState.CreateWaypointBtn = createButton("Create Waypoint Here", HubState.WaypointPage, Color3.fromRGB(210, 235, 255))
 
-local WaypointListFrame = Instance.new("ScrollingFrame", WaypointPage)
-WaypointListFrame.Size = UDim2.new(1, 0, 0, 140)
-WaypointListFrame.BackgroundTransparency = 1
-WaypointListFrame.ScrollBarThickness = 2
+HubState.WaypointListFrame = Instance.new("ScrollingFrame", HubState.WaypointPage)
+HubState.WaypointListFrame.Size = UDim2.new(1, 0, 0, 140)
+HubState.WaypointListFrame.BackgroundTransparency = 1
+HubState.WaypointListFrame.ScrollBarThickness = 2
 
-local WaypointListLayout = Instance.new("UIListLayout", WaypointListFrame)
-WaypointListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-WaypointListLayout.Padding = UDim.new(0, 4)
+HubState.WaypointListLayout = Instance.new("UIListLayout", HubState.WaypointListFrame)
+HubState.WaypointListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+HubState.WaypointListLayout.Padding = UDim.new(0, 4)
 
 local function refreshWaypointList()
-	for _, child in pairs(WaypointListFrame:GetChildren()) do
+	for _, child in pairs(HubState.WaypointListFrame:GetChildren()) do
 		if child:IsA("Frame") then child:Destroy() end
 	end
 	
 	for idx, wpData in ipairs(HubState.Waypoints) do
-		local row = Instance.new("Frame", WaypointListFrame)
+		local row = Instance.new("Frame", HubState.WaypointListFrame)
 		row.Size = UDim2.new(1, 0, 0, 32)
 		row.BackgroundColor3 = Theme.Surface
 		row.BackgroundTransparency = 0.38
@@ -2682,12 +2680,12 @@ for _, wpData in ipairs(HubState.Waypoints) do
 end
 refreshWaypointList()
 
-CreateWaypointBtn.MouseButton1Click:Connect(function()
+HubState.CreateWaypointBtn.MouseButton1Click:Connect(function()
 	local char = LocalPlayer.Character
 	if char and char:FindFirstChild("HumanoidRootPart") then
 		local pos = char.HumanoidRootPart.Position
 		local wpData = {
-			Name = (WaypointNameBox.Text ~= "") and WaypointNameBox.Text or ("Pin " .. (#HubState.Waypoints + 1)),
+			Name = (HubState.WaypointNameBox.Text ~= "") and HubState.WaypointNameBox.Text or ("Pin " .. (#HubState.Waypoints + 1)),
 			Position = pos,
 			Color = HubState.WaypointColor
 		}
@@ -2695,175 +2693,175 @@ CreateWaypointBtn.MouseButton1Click:Connect(function()
 		spawnWaypointWorldUI(wpData)
 		refreshWaypointList()
 		saveWaypoints()
-		WaypointNameBox.Text = ""
+		HubState.WaypointNameBox.Text = ""
 	end
 end)
 
 -- ==========================================
 -- ⚡ SECTION 3: SPEED ENGINE & TELEMETRY
 -- ==========================================
-createSectionHeader("Speed Engine", SpeedPage)
-local SpeedToggleBtn = createButton("Speed Engine: OFF", SpeedPage, Theme.Surface)
-local BreakVelToggleBtn = createButton("Break Velocity (Spoof): OFF", SpeedPage, Color3.fromRGB(210, 235, 255))
-local MatchBaseBtn = createButton("Match Base Speed Spoof: ON", SpeedPage, Color3.fromRGB(210, 235, 255))
+createSectionHeader("Speed Engine", HubState.SpeedPage)
+HubState.SpeedToggleBtn = createButton("Speed Engine: OFF", HubState.SpeedPage, Theme.Surface)
+HubState.BreakVelToggleBtn = createButton("Break Velocity (Spoof): OFF", HubState.SpeedPage, Color3.fromRGB(210, 235, 255))
+HubState.MatchBaseBtn = createButton("Match Base Speed Spoof: ON", HubState.SpeedPage, Color3.fromRGB(210, 235, 255))
 
-createSectionHeader("View Baseline", SpeedPage)
-local ViewBaselineFrame = Instance.new("Frame", SpeedPage)
-ViewBaselineFrame.Size = UDim2.new(1, 0, 0, 70)
-ViewBaselineFrame.BackgroundColor3 = Theme.Surface
-ViewBaselineFrame.BackgroundTransparency = 0.42
-ViewBaselineFrame.BorderSizePixel = 0
-local viewBaseCorner = Instance.new("UICorner", ViewBaselineFrame)
-viewBaseCorner.CornerRadius = UDim.new(0, 11)
-local viewBaseStroke = Instance.new("UIStroke", ViewBaselineFrame)
-viewBaseStroke.Color = Theme.White
-viewBaseStroke.Transparency = 0.6
+createSectionHeader("View Baseline", HubState.SpeedPage)
+HubState.ViewBaselineFrame = Instance.new("Frame", HubState.SpeedPage)
+HubState.ViewBaselineFrame.Size = UDim2.new(1, 0, 0, 70)
+HubState.ViewBaselineFrame.BackgroundColor3 = Theme.Surface
+HubState.ViewBaselineFrame.BackgroundTransparency = 0.42
+HubState.ViewBaselineFrame.BorderSizePixel = 0
+HubState.viewBaseCorner = Instance.new("UICorner", HubState.ViewBaselineFrame)
+HubState.viewBaseCorner.CornerRadius = UDim.new(0, 11)
+HubState.viewBaseStroke = Instance.new("UIStroke", HubState.ViewBaselineFrame)
+HubState.viewBaseStroke.Color = Theme.White
+HubState.viewBaseStroke.Transparency = 0.6
 
-local ViewBaselineInfo = Instance.new("TextLabel", ViewBaselineFrame)
-ViewBaselineInfo.Size = UDim2.new(0.56, -8, 0, 38)
-ViewBaselineInfo.Position = UDim2.new(0, 10, 0, 5)
-ViewBaselineInfo.BackgroundTransparency = 1
-ViewBaselineInfo.Text = "Server WalkSpeed / Velocity Cap View\nCurrent: " .. tostring(HubState.ViewBaselineSpeed)
-ViewBaselineInfo.TextColor3 = Theme.TextSecondary
-ViewBaselineInfo.FontFace = ROBOTO_BOLD
-ViewBaselineInfo.TextSize = 10
-ViewBaselineInfo.TextXAlignment = Enum.TextXAlignment.Left
-ViewBaselineInfo.TextYAlignment = Enum.TextYAlignment.Center
+HubState.ViewBaselineInfo = Instance.new("TextLabel", HubState.ViewBaselineFrame)
+HubState.ViewBaselineInfo.Size = UDim2.new(0.56, -8, 0, 38)
+HubState.ViewBaselineInfo.Position = UDim2.new(0, 10, 0, 5)
+HubState.ViewBaselineInfo.BackgroundTransparency = 1
+HubState.ViewBaselineInfo.Text = "Server WalkSpeed / Velocity Cap View\nCurrent: " .. tostring(HubState.ViewBaselineSpeed)
+HubState.ViewBaselineInfo.TextColor3 = Theme.TextSecondary
+HubState.ViewBaselineInfo.FontFace = ROBOTO_BOLD
+HubState.ViewBaselineInfo.TextSize = 10
+HubState.ViewBaselineInfo.TextXAlignment = Enum.TextXAlignment.Left
+HubState.ViewBaselineInfo.TextYAlignment = Enum.TextYAlignment.Center
 
-local ViewBaselineBox = Instance.new("TextBox", ViewBaselineFrame)
-ViewBaselineBox.Size = UDim2.new(0.28, 0, 0, 30)
-ViewBaselineBox.Position = UDim2.new(0.59, 0, 0, 8)
-ViewBaselineBox.BackgroundColor3 = Theme.Surface
-ViewBaselineBox.BackgroundTransparency = 0.42
-ViewBaselineBox.Text = tostring(HubState.ViewBaselineSpeed)
-ViewBaselineBox.PlaceholderText = "Speed"
-ViewBaselineBox.TextColor3 = Theme.Text
-ViewBaselineBox.FontFace = ROBOTO_BOLD
-ViewBaselineBox.TextSize = 12
-ViewBaselineBox.ClearTextOnFocus = false
-Instance.new("UICorner", ViewBaselineBox).CornerRadius = UDim.new(0, 8)
+HubState.ViewBaselineBox = Instance.new("TextBox", HubState.ViewBaselineFrame)
+HubState.ViewBaselineBox.Size = UDim2.new(0.28, 0, 0, 30)
+HubState.ViewBaselineBox.Position = UDim2.new(0.59, 0, 0, 8)
+HubState.ViewBaselineBox.BackgroundColor3 = Theme.Surface
+HubState.ViewBaselineBox.BackgroundTransparency = 0.42
+HubState.ViewBaselineBox.Text = tostring(HubState.ViewBaselineSpeed)
+HubState.ViewBaselineBox.PlaceholderText = "Speed"
+HubState.ViewBaselineBox.TextColor3 = Theme.Text
+HubState.ViewBaselineBox.FontFace = ROBOTO_BOLD
+HubState.ViewBaselineBox.TextSize = 12
+HubState.ViewBaselineBox.ClearTextOnFocus = false
+Instance.new("UICorner", HubState.ViewBaselineBox).CornerRadius = UDim.new(0, 8)
 
-local ApplyViewBaselineBtn = createButton("Apply", ViewBaselineFrame, Theme.Surface)
-ApplyViewBaselineBtn.Size = UDim2.new(0.12, 0, 0, 30)
-ApplyViewBaselineBtn.Position = UDim2.new(0.87, 0, 0, 8)
-ApplyViewBaselineBtn.TextSize = 10
-local ApplyViewBaselineStatus = ApplyViewBaselineBtn:FindFirstChild("StatusPill")
-if ApplyViewBaselineStatus then ApplyViewBaselineStatus.Visible = false end
+HubState.ApplyViewBaselineBtn = createButton("Apply", HubState.ViewBaselineFrame, Theme.Surface)
+HubState.ApplyViewBaselineBtn.Size = UDim2.new(0.12, 0, 0, 30)
+HubState.ApplyViewBaselineBtn.Position = UDim2.new(0.87, 0, 0, 8)
+HubState.ApplyViewBaselineBtn.TextSize = 10
+HubState.ApplyViewBaselineStatus = HubState.ApplyViewBaselineBtn:FindFirstChild("StatusPill")
+if HubState.ApplyViewBaselineStatus then HubState.ApplyViewBaselineStatus.Visible = false end
 
-local DisplayFrame = Instance.new("Frame", SpeedPage)
-DisplayFrame.Size = UDim2.new(1, 0, 0, 110)
-DisplayFrame.BackgroundColor3 = Theme.Surface
-DisplayFrame.BackgroundTransparency = 0.42
-DisplayFrame.BorderSizePixel = 0
-local displayCorner = Instance.new("UICorner", DisplayFrame)
-displayCorner.CornerRadius = UDim.new(0, 13)
-local dispStroke = Instance.new("UIStroke", DisplayFrame)
-dispStroke.Color = Theme.White
-dispStroke.Transparency = 0.58
-dispStroke.Thickness = 1
+HubState.DisplayFrame = Instance.new("Frame", HubState.SpeedPage)
+HubState.DisplayFrame.Size = UDim2.new(1, 0, 0, 110)
+HubState.DisplayFrame.BackgroundColor3 = Theme.Surface
+HubState.DisplayFrame.BackgroundTransparency = 0.42
+HubState.DisplayFrame.BorderSizePixel = 0
+HubState.displayCorner = Instance.new("UICorner", HubState.DisplayFrame)
+HubState.displayCorner.CornerRadius = UDim.new(0, 13)
+HubState.dispStroke = Instance.new("UIStroke", HubState.DisplayFrame)
+HubState.dispStroke.Color = Theme.White
+HubState.dispStroke.Transparency = 0.58
+HubState.dispStroke.Thickness = 1
 
-local ActualSpeedLabel = Instance.new("TextLabel", DisplayFrame)
-ActualSpeedLabel.Size = UDim2.new(1, -12, 0, 18)
-ActualSpeedLabel.Position = UDim2.new(0, 10, 0, 6)
-ActualSpeedLabel.BackgroundTransparency = 1
-ActualSpeedLabel.Text = "Real-Time WalkSpeed: 16"
-ActualSpeedLabel.TextColor3 = Theme.Text
-ActualSpeedLabel.FontFace = ROBOTO_BOLD
-ActualSpeedLabel.TextSize = 11
-ActualSpeedLabel.TextXAlignment = Enum.TextXAlignment.Left
+HubState.ActualSpeedLabel = Instance.new("TextLabel", HubState.DisplayFrame)
+HubState.ActualSpeedLabel.Size = UDim2.new(1, -12, 0, 18)
+HubState.ActualSpeedLabel.Position = UDim2.new(0, 10, 0, 6)
+HubState.ActualSpeedLabel.BackgroundTransparency = 1
+HubState.ActualSpeedLabel.Text = "Real-Time WalkSpeed: 16"
+HubState.ActualSpeedLabel.TextColor3 = Theme.Text
+HubState.ActualSpeedLabel.FontFace = ROBOTO_BOLD
+HubState.ActualSpeedLabel.TextSize = 11
+HubState.ActualSpeedLabel.TextXAlignment = Enum.TextXAlignment.Left
 
-local VelocityLabel = Instance.new("TextLabel", DisplayFrame)
-VelocityLabel.Size = UDim2.new(1, -12, 0, 18)
-VelocityLabel.Position = UDim2.new(0, 10, 0, 26)
-VelocityLabel.BackgroundTransparency = 1
-VelocityLabel.Text = "Physical Velocity: 0.00 studs/s"
-VelocityLabel.TextColor3 = Theme.TextSecondary
-VelocityLabel.FontFace = ROBOTO_BOLD
-VelocityLabel.TextSize = 11
-VelocityLabel.TextXAlignment = Enum.TextXAlignment.Left
+HubState.VelocityLabel = Instance.new("TextLabel", HubState.DisplayFrame)
+HubState.VelocityLabel.Size = UDim2.new(1, -12, 0, 18)
+HubState.VelocityLabel.Position = UDim2.new(0, 10, 0, 26)
+HubState.VelocityLabel.BackgroundTransparency = 1
+HubState.VelocityLabel.Text = "Physical Velocity: 0.00 studs/s"
+HubState.VelocityLabel.TextColor3 = Theme.TextSecondary
+HubState.VelocityLabel.FontFace = ROBOTO_BOLD
+HubState.VelocityLabel.TextSize = 11
+HubState.VelocityLabel.TextXAlignment = Enum.TextXAlignment.Left
 
-local SpoofedVelLabel = Instance.new("TextLabel", DisplayFrame)
-SpoofedVelLabel.Size = UDim2.new(1, -12, 0, 18)
-SpoofedVelLabel.Position = UDim2.new(0, 10, 0, 46)
-SpoofedVelLabel.BackgroundTransparency = 1
-SpoofedVelLabel.Text = "Spoofed Velocity (Server View): OFF"
-SpoofedVelLabel.TextColor3 = Theme.Text
-SpoofedVelLabel.FontFace = ROBOTO_BOLD
-SpoofedVelLabel.TextSize = 11
-SpoofedVelLabel.TextXAlignment = Enum.TextXAlignment.Left
+HubState.SpoofedVelLabel = Instance.new("TextLabel", HubState.DisplayFrame)
+HubState.SpoofedVelLabel.Size = UDim2.new(1, -12, 0, 18)
+HubState.SpoofedVelLabel.Position = UDim2.new(0, 10, 0, 46)
+HubState.SpoofedVelLabel.BackgroundTransparency = 1
+HubState.SpoofedVelLabel.Text = "Spoofed Velocity (Server View): OFF"
+HubState.SpoofedVelLabel.TextColor3 = Theme.Text
+HubState.SpoofedVelLabel.FontFace = ROBOTO_BOLD
+HubState.SpoofedVelLabel.TextSize = 11
+HubState.SpoofedVelLabel.TextXAlignment = Enum.TextXAlignment.Left
 
-local ServerSpeedLabel = Instance.new("TextLabel", DisplayFrame)
-ServerSpeedLabel.Size = UDim2.new(1, -12, 0, 18)
-ServerSpeedLabel.Position = UDim2.new(0, 10, 0, 66)
-ServerSpeedLabel.BackgroundTransparency = 1
-ServerSpeedLabel.Text = "Server View WalkSpeed: " .. tostring(HubState.ViewBaselineSpeed)
-ServerSpeedLabel.TextColor3 = Theme.TextSecondary
-ServerSpeedLabel.FontFace = ROBOTO_BOLD
-ServerSpeedLabel.TextSize = 11
-ServerSpeedLabel.TextXAlignment = Enum.TextXAlignment.Left
+HubState.ServerSpeedLabel = Instance.new("TextLabel", HubState.DisplayFrame)
+HubState.ServerSpeedLabel.Size = UDim2.new(1, -12, 0, 18)
+HubState.ServerSpeedLabel.Position = UDim2.new(0, 10, 0, 66)
+HubState.ServerSpeedLabel.BackgroundTransparency = 1
+HubState.ServerSpeedLabel.Text = "Server View WalkSpeed: " .. tostring(HubState.ViewBaselineSpeed)
+HubState.ServerSpeedLabel.TextColor3 = Theme.TextSecondary
+HubState.ServerSpeedLabel.FontFace = ROBOTO_BOLD
+HubState.ServerSpeedLabel.TextSize = 11
+HubState.ServerSpeedLabel.TextXAlignment = Enum.TextXAlignment.Left
 
-local TargetSpeedLabel = Instance.new("TextLabel", DisplayFrame)
-TargetSpeedLabel.Size = UDim2.new(1, -12, 0, 18)
-TargetSpeedLabel.Position = UDim2.new(0, 10, 0, 86)
-TargetSpeedLabel.BackgroundTransparency = 1
-TargetSpeedLabel.Text = "Capped Target Speed: OFF"
-TargetSpeedLabel.TextColor3 = Theme.Text
-TargetSpeedLabel.FontFace = ROBOTO_BOLD
-TargetSpeedLabel.TextSize = 11
-TargetSpeedLabel.TextXAlignment = Enum.TextXAlignment.Left
+HubState.TargetSpeedLabel = Instance.new("TextLabel", HubState.DisplayFrame)
+HubState.TargetSpeedLabel.Size = UDim2.new(1, -12, 0, 18)
+HubState.TargetSpeedLabel.Position = UDim2.new(0, 10, 0, 86)
+HubState.TargetSpeedLabel.BackgroundTransparency = 1
+HubState.TargetSpeedLabel.Text = "Capped Target Speed: OFF"
+HubState.TargetSpeedLabel.TextColor3 = Theme.Text
+HubState.TargetSpeedLabel.FontFace = ROBOTO_BOLD
+HubState.TargetSpeedLabel.TextSize = 11
+HubState.TargetSpeedLabel.TextXAlignment = Enum.TextXAlignment.Left
 
-createSectionHeader("Speed Values", SpeedPage)
-local AddedSpeedContainer = Instance.new("Frame", SpeedPage)
-AddedSpeedContainer.Size = UDim2.new(1, 0, 0, 36)
-AddedSpeedContainer.BackgroundTransparency = 1
+createSectionHeader("Speed Values", HubState.SpeedPage)
+HubState.AddedSpeedContainer = Instance.new("Frame", HubState.SpeedPage)
+HubState.AddedSpeedContainer.Size = UDim2.new(1, 0, 0, 36)
+HubState.AddedSpeedContainer.BackgroundTransparency = 1
 
-local AddedLabel = Instance.new("TextLabel", AddedSpeedContainer)
-AddedLabel.Size = UDim2.new(0.6, 0, 1, 0)
-AddedLabel.BackgroundTransparency = 1
-AddedLabel.Text = "Added Speed Value:"
-AddedLabel.TextColor3 = Theme.Text
-AddedLabel.FontFace = ROBOTO_BOLD
-AddedLabel.TextSize = 11
-AddedLabel.TextXAlignment = Enum.TextXAlignment.Left
+HubState.AddedLabel = Instance.new("TextLabel", HubState.AddedSpeedContainer)
+HubState.AddedLabel.Size = UDim2.new(0.6, 0, 1, 0)
+HubState.AddedLabel.BackgroundTransparency = 1
+HubState.AddedLabel.Text = "Added Speed Value:"
+HubState.AddedLabel.TextColor3 = Theme.Text
+HubState.AddedLabel.FontFace = ROBOTO_BOLD
+HubState.AddedLabel.TextSize = 11
+HubState.AddedLabel.TextXAlignment = Enum.TextXAlignment.Left
 
-local AddedBox = Instance.new("TextBox", AddedSpeedContainer)
-AddedBox.Size = UDim2.new(0.38, 0, 1, 0)
-AddedBox.Position = UDim2.new(0.62, 0, 0, 0)
-AddedBox.BackgroundColor3 = Theme.Surface
-AddedBox.BackgroundTransparency = 0.42
-AddedBox.Text = tostring(HubState.AddedSpeed)
-AddedBox.TextColor3 = Theme.Text
-AddedBox.FontFace = ROBOTO_BOLD
-AddedBox.TextSize = 12
-Instance.new("UICorner", AddedBox).CornerRadius = UDim.new(0, 11)
+HubState.AddedBox = Instance.new("TextBox", HubState.AddedSpeedContainer)
+HubState.AddedBox.Size = UDim2.new(0.38, 0, 1, 0)
+HubState.AddedBox.Position = UDim2.new(0.62, 0, 0, 0)
+HubState.AddedBox.BackgroundColor3 = Theme.Surface
+HubState.AddedBox.BackgroundTransparency = 0.42
+HubState.AddedBox.Text = tostring(HubState.AddedSpeed)
+HubState.AddedBox.TextColor3 = Theme.Text
+HubState.AddedBox.FontFace = ROBOTO_BOLD
+HubState.AddedBox.TextSize = 12
+Instance.new("UICorner", HubState.AddedBox).CornerRadius = UDim.new(0, 11)
 
-local CapContainer = Instance.new("Frame", SpeedPage)
-CapContainer.Size = UDim2.new(1, 0, 0, 36)
-CapContainer.BackgroundTransparency = 1
+HubState.CapContainer = Instance.new("Frame", HubState.SpeedPage)
+HubState.CapContainer.Size = UDim2.new(1, 0, 0, 36)
+HubState.CapContainer.BackgroundTransparency = 1
 
-local CapLabel = Instance.new("TextLabel", CapContainer)
-CapLabel.Size = UDim2.new(0.6, 0, 1, 0)
-CapLabel.BackgroundTransparency = 1
-CapLabel.Text = "Hard Speed Safety Cap:"
-CapLabel.TextColor3 = Theme.Text
-CapLabel.FontFace = ROBOTO_BOLD
-CapLabel.TextSize = 11
-CapLabel.TextXAlignment = Enum.TextXAlignment.Left
+HubState.CapLabel = Instance.new("TextLabel", HubState.CapContainer)
+HubState.CapLabel.Size = UDim2.new(0.6, 0, 1, 0)
+HubState.CapLabel.BackgroundTransparency = 1
+HubState.CapLabel.Text = "Hard Speed Safety Cap:"
+HubState.CapLabel.TextColor3 = Theme.Text
+HubState.CapLabel.FontFace = ROBOTO_BOLD
+HubState.CapLabel.TextSize = 11
+HubState.CapLabel.TextXAlignment = Enum.TextXAlignment.Left
 
-local CapBox = Instance.new("TextBox", CapContainer)
-CapBox.Size = UDim2.new(0.38, 0, 1, 0)
-CapBox.Position = UDim2.new(0.62, 0, 0, 0)
-CapBox.BackgroundColor3 = Theme.Surface
-CapBox.BackgroundTransparency = 0.42
-CapBox.Text = tostring(HubState.SpeedCap)
-CapBox.TextColor3 = Theme.Text
-CapBox.FontFace = ROBOTO_BOLD
-CapBox.TextSize = 12
-Instance.new("UICorner", CapBox).CornerRadius = UDim.new(0, 11)
+HubState.CapBox = Instance.new("TextBox", HubState.CapContainer)
+HubState.CapBox.Size = UDim2.new(0.38, 0, 1, 0)
+HubState.CapBox.Position = UDim2.new(0.62, 0, 0, 0)
+HubState.CapBox.BackgroundColor3 = Theme.Surface
+HubState.CapBox.BackgroundTransparency = 0.42
+HubState.CapBox.Text = tostring(HubState.SpeedCap)
+HubState.CapBox.TextColor3 = Theme.Text
+HubState.CapBox.FontFace = ROBOTO_BOLD
+HubState.CapBox.TextSize = 12
+Instance.new("UICorner", HubState.CapBox).CornerRadius = UDim.new(0, 11)
 
-local ApplySpeedBtn = createButton("Apply Speed Modifications", SpeedPage, Color3.fromRGB(210, 235, 255))
-local ApplySpeedStatus = ApplySpeedBtn:FindFirstChild("StatusPill")
-if ApplySpeedStatus then ApplySpeedStatus.Visible = false end
+HubState.ApplySpeedBtn = createButton("Apply Speed Modifications", HubState.SpeedPage, Color3.fromRGB(210, 235, 255))
+HubState.ApplySpeedStatus = HubState.ApplySpeedBtn:FindFirstChild("StatusPill")
+if HubState.ApplySpeedStatus then HubState.ApplySpeedStatus.Visible = false end
 
 local function applySpeedPhysics()
 	local char = LocalPlayer.Character
@@ -2875,10 +2873,10 @@ local function applySpeedPhysics()
 		local rawTarget = HubState.OriginalSpeed + HubState.AddedSpeed
 		local finalCappedSpeed = math.min(rawTarget, HubState.SpeedCap)
 		hum.WalkSpeed = finalCappedSpeed
-		TargetSpeedLabel.Text = "Capped Target Speed: " .. tostring(finalCappedSpeed)
+		HubState.TargetSpeedLabel.Text = "Capped Target Speed: " .. tostring(finalCappedSpeed)
 	else
 		hum.WalkSpeed = HubState.OriginalSpeed
-		TargetSpeedLabel.Text = "Capped Target Speed: OFF"
+		HubState.TargetSpeedLabel.Text = "Capped Target Speed: OFF"
 	end
 end
 
@@ -2893,47 +2891,47 @@ local function toggleSpeedEngine()
 		HubState.SpeedEngineToggled = false
 	end
 	
-	SpeedToggleBtn.Text = "Speed Engine: " .. (HubState.SpeedEngineToggled and "ON" or "OFF")
+	HubState.SpeedToggleBtn.Text = "Speed Engine: " .. (HubState.SpeedEngineToggled and "ON" or "OFF")
 	applySpeedPhysics()
 end
 
-SpeedToggleBtn.MouseButton1Click:Connect(toggleSpeedEngine)
+HubState.SpeedToggleBtn.MouseButton1Click:Connect(toggleSpeedEngine)
 
-BreakVelToggleBtn.MouseButton1Click:Connect(function()
+HubState.BreakVelToggleBtn.MouseButton1Click:Connect(function()
 	HubState.BreakVelocityToggled = not HubState.BreakVelocityToggled
-	BreakVelToggleBtn.Text = "Break Velocity (Spoof): " .. (HubState.BreakVelocityToggled and "ON" or "OFF")
+	HubState.BreakVelToggleBtn.Text = "Break Velocity (Spoof): " .. (HubState.BreakVelocityToggled and "ON" or "OFF")
 end)
 
-MatchBaseBtn.MouseButton1Click:Connect(function()
+HubState.MatchBaseBtn.MouseButton1Click:Connect(function()
 	HubState.MatchBaseSpeedToggled = not HubState.MatchBaseSpeedToggled
-	MatchBaseBtn.Text = "Match Base Speed Spoof: " .. (HubState.MatchBaseSpeedToggled and "ON" or "OFF (Static 0)")
+	HubState.MatchBaseBtn.Text = "Match Base Speed Spoof: " .. (HubState.MatchBaseSpeedToggled and "ON" or "OFF (Static 0)")
 end)
 
-ApplySpeedBtn.MouseButton1Click:Connect(function()
+HubState.ApplySpeedBtn.MouseButton1Click:Connect(function()
 	if not HubState.SpeedEngineToggled then return end
-	local newAdded = tonumber(AddedBox.Text)
-	local newCap = tonumber(CapBox.Text)
+	local newAdded = tonumber(HubState.AddedBox.Text)
+	local newCap = tonumber(HubState.CapBox.Text)
 	if newAdded then HubState.AddedSpeed = newAdded end
 	if newCap then HubState.SpeedCap = newCap end
 	applySpeedPhysics()
 end)
 
 local function applyViewBaseline()
-	local value = tonumber(ViewBaselineBox.Text)
+	local value = tonumber(HubState.ViewBaselineBox.Text)
 	if not value then
-		ViewBaselineBox.Text = tostring(HubState.ViewBaselineSpeed)
+		HubState.ViewBaselineBox.Text = tostring(HubState.ViewBaselineSpeed)
 		return
 	end
 
 	value = math.clamp(value, 0, 1000)
 	HubState.ViewBaselineSpeed = value
-	ViewBaselineBox.Text = tostring(value)
-	ViewBaselineInfo.Text = "Server WalkSpeed / Velocity Cap View\nCurrent: " .. tostring(value)
-	ServerSpeedLabel.Text = "Server View WalkSpeed: " .. tostring(value)
+	HubState.ViewBaselineBox.Text = tostring(value)
+	HubState.ViewBaselineInfo.Text = "Server WalkSpeed / Velocity Cap View\nCurrent: " .. tostring(value)
+	HubState.ServerSpeedLabel.Text = "Server View WalkSpeed: " .. tostring(value)
 end
 
-ApplyViewBaselineBtn.MouseButton1Click:Connect(applyViewBaseline)
-ViewBaselineBox.FocusLost:Connect(function(enterPressed)
+HubState.ApplyViewBaselineBtn.MouseButton1Click:Connect(applyViewBaseline)
+HubState.ViewBaselineBox.FocusLost:Connect(function(enterPressed)
 	if enterPressed then applyViewBaseline() end
 end)
 
@@ -2981,9 +2979,9 @@ end
 -- ==========================================
 -- 🌌 SECTION 4: OTHERS TAB
 -- ==========================================
-createSectionHeader("Player", OthersPage)
-local ResetPlayerBtn = createButton("Reset Character", OthersPage, Theme.Surface)
-ResetPlayerBtn.MouseButton1Click:Connect(function()
+createSectionHeader("Player", HubState.OthersPage)
+HubState.ResetPlayerBtn = createButton("Reset Character", HubState.OthersPage, Theme.Surface)
+HubState.ResetPlayerBtn.MouseButton1Click:Connect(function()
 	playUISoundPair(ResetSFX1, ResetSFX2)
 	local char = LocalPlayer.Character
 	if not char then return end
@@ -3004,10 +3002,10 @@ ResetPlayerBtn.MouseButton1Click:Connect(function()
 	end
 end)
 
-createSectionHeader("Lighting", OthersPage)
-local LightToggleBtn = createButton("Infinite Yield Light: OFF", OthersPage, Theme.Surface)
+createSectionHeader("Lighting", HubState.OthersPage)
+HubState.LightToggleBtn = createButton("Infinite Yield Light: OFF", HubState.OthersPage, Theme.Surface)
 
-createSlider("Light Range", HubState.LightRange, 4, 64, OthersPage, function(val)
+createSlider("Light Range", HubState.LightRange, 4, 64, HubState.OthersPage, function(val)
 	HubState.LightRange = val
 	local char = LocalPlayer.Character
 	local root = char and char:FindFirstChild("HumanoidRootPart")
@@ -3015,7 +3013,7 @@ createSlider("Light Range", HubState.LightRange, 4, 64, OthersPage, function(val
 	if pointLight then pointLight.Range = val end
 end)
 
-createSlider("Light Brightness", HubState.LightBrightness, 0.1, 10, OthersPage, function(val)
+createSlider("Light Brightness", HubState.LightBrightness, 0.1, 10, HubState.OthersPage, function(val)
 	HubState.LightBrightness = val
 	local char = LocalPlayer.Character
 	local root = char and char:FindFirstChild("HumanoidRootPart")
@@ -3023,7 +3021,7 @@ createSlider("Light Brightness", HubState.LightBrightness, 0.1, 10, OthersPage, 
 	if pointLight then pointLight.Brightness = val end
 end)
 
-create2DColorPicker("Light Color", HubState.LightColor, OthersPage, function(newColor)
+create2DColorPicker("Light Color", HubState.LightColor, HubState.OthersPage, function(newColor)
 	HubState.LightColor = newColor
 	local char = LocalPlayer.Character
 	local root = char and char:FindFirstChild("HumanoidRootPart")
@@ -3031,10 +3029,10 @@ create2DColorPicker("Light Color", HubState.LightColor, OthersPage, function(new
 	if pointLight then pointLight.Color = newColor end
 end)
 
-local ShadowToggleBtn = createButton("Cast Shadows: OFF", OthersPage, Color3.fromRGB(210, 235, 255))
-ShadowToggleBtn.MouseButton1Click:Connect(function()
+HubState.ShadowToggleBtn = createButton("Cast Shadows: OFF", HubState.OthersPage, Color3.fromRGB(210, 235, 255))
+HubState.ShadowToggleBtn.MouseButton1Click:Connect(function()
 	HubState.LightShadows = not HubState.LightShadows
-	ShadowToggleBtn.Text = "Cast Shadows: " .. (HubState.LightShadows and "ON" or "OFF")
+	HubState.ShadowToggleBtn.Text = "Cast Shadows: " .. (HubState.LightShadows and "ON" or "OFF")
 	local char = LocalPlayer.Character
 	local root = char and char:FindFirstChild("HumanoidRootPart")
 	local pointLight = root and root:FindFirstChild("GeminiHub_PlayerLight")
@@ -3060,23 +3058,23 @@ local function updatePlayerLight()
 	end
 end
 
-LightToggleBtn.MouseButton1Click:Connect(function()
+HubState.LightToggleBtn.MouseButton1Click:Connect(function()
 	HubState.LightToggled = not HubState.LightToggled
-	LightToggleBtn.Text = "Infinite Yield Light: " .. (HubState.LightToggled and "ON" or "OFF")
+	HubState.LightToggleBtn.Text = "Infinite Yield Light: " .. (HubState.LightToggled and "ON" or "OFF")
 	updatePlayerLight()
 end)
 
-createSectionHeader("Environment", OthersPage)
-local TimeOverrideBtn = createButton("Override Time of Day: OFF", OthersPage, Theme.Surface)
+createSectionHeader("Environment", HubState.OthersPage)
+HubState.TimeOverrideBtn = createButton("Override Time of Day: OFF", HubState.OthersPage, Theme.Surface)
 local timeLoopConnection
 
-createSlider("Daytime Slider", HubState.DaytimeValue, 0, 24, OthersPage, function(val)
+createSlider("Daytime Slider", HubState.DaytimeValue, 0, 24, HubState.OthersPage, function(val)
 	HubState.DaytimeValue = val
 end)
 
-TimeOverrideBtn.MouseButton1Click:Connect(function()
+HubState.TimeOverrideBtn.MouseButton1Click:Connect(function()
 	HubState.DaytimeToggled = not HubState.DaytimeToggled
-	TimeOverrideBtn.Text = "Override Time of Day: " .. (HubState.DaytimeToggled and "ON" or "OFF")
+	HubState.TimeOverrideBtn.Text = "Override Time of Day: " .. (HubState.DaytimeToggled and "ON" or "OFF")
 	
 	if HubState.DaytimeToggled then
 		timeLoopConnection = RunService.RenderStepped:Connect(function()
@@ -3090,74 +3088,74 @@ TimeOverrideBtn.MouseButton1Click:Connect(function()
 	end
 end)
 
-createSlider("Tactical FOV", 70, 70, 120, OthersPage, function(val)
+createSlider("Tactical FOV", 70, 70, 120, HubState.OthersPage, function(val)
 	Workspace.CurrentCamera.FieldOfView = val
 end)
 
-local HoverToggleBtn = createButton("Hover Name ESP: OFF", OthersPage, Color3.fromRGB(210, 235, 255))
-local PlayerMouse = LocalPlayer:GetMouse()
+HubState.HoverToggleBtn = createButton("Hover Name ESP: OFF", HubState.OthersPage, Color3.fromRGB(210, 235, 255))
+HubState.PlayerMouse = LocalPlayer:GetMouse()
 
 -- Hover Name ESP uses the same lightweight SelectionBox-style outline approach
 -- used by Infinite Yield's hovername ESP instead of a Highlight instance.
-local oldHoverOutline = safeParent:FindFirstChild("Gemini_Hover_Outline")
-if oldHoverOutline then oldHoverOutline:Destroy() end
+HubState.oldHoverOutline = safeParent:FindFirstChild("Gemini_Hover_Outline")
+if HubState.oldHoverOutline then HubState.oldHoverOutline:Destroy() end
 
-local oldHoverName = safeParent:FindFirstChild("Gemini_Hover_Name")
-if oldHoverName then oldHoverName:Destroy() end
+HubState.oldHoverName = safeParent:FindFirstChild("Gemini_Hover_Name")
+if HubState.oldHoverName then HubState.oldHoverName:Destroy() end
 
-local HoverOutline = Instance.new("SelectionBox")
-HoverOutline.Name = "Gemini_Hover_Outline"
-HoverOutline.Color3 = Color3.fromRGB(255, 255, 255)
-HoverOutline.SurfaceColor3 = Color3.fromRGB(255, 255, 255)
-HoverOutline.SurfaceTransparency = 1
-HoverOutline.Transparency = 0
-HoverOutline.LineThickness = 0.03
-HoverOutline.Adornee = nil
-HoverOutline.Parent = safeParent
+HubState.HoverOutline = Instance.new("SelectionBox")
+HubState.HoverOutline.Name = "Gemini_Hover_Outline"
+HubState.HoverOutline.Color3 = Color3.fromRGB(255, 255, 255)
+HubState.HoverOutline.SurfaceColor3 = Color3.fromRGB(255, 255, 255)
+HubState.HoverOutline.SurfaceTransparency = 1
+HubState.HoverOutline.Transparency = 0
+HubState.HoverOutline.LineThickness = 0.03
+HubState.HoverOutline.Adornee = nil
+HubState.HoverOutline.Parent = safeParent
 
-local HoverBB = Instance.new("BillboardGui")
-HoverBB.Name = "Gemini_Hover_Name"
-HoverBB.Size = UDim2.new(0, 140, 0, 24)
-HoverBB.StudsOffset = Vector3.new(0, 3.5, 0)
-HoverBB.AlwaysOnTop = true
+HubState.HoverBB = Instance.new("BillboardGui")
+HubState.HoverBB.Name = "Gemini_Hover_Name"
+HubState.HoverBB.Size = UDim2.new(0, 140, 0, 24)
+HubState.HoverBB.StudsOffset = Vector3.new(0, 3.5, 0)
+HubState.HoverBB.AlwaysOnTop = true
 
-local HoverText = Instance.new("TextLabel", HoverBB)
-HoverText.Size = UDim2.new(1, 0, 1, 0)
-HoverText.BackgroundTransparency = 1
-HoverText.TextColor3 = Color3.fromRGB(255, 255, 255)
-HoverText.FontFace = ROBOTO_BOLD
-HoverText.TextSize = 14
-HoverText.TextStrokeTransparency = 1
-HoverText.TextXAlignment = Enum.TextXAlignment.Center
+HubState.HoverText = Instance.new("TextLabel", HubState.HoverBB)
+HubState.HoverText.Size = UDim2.new(1, 0, 1, 0)
+HubState.HoverText.BackgroundTransparency = 1
+HubState.HoverText.TextColor3 = Color3.fromRGB(255, 255, 255)
+HubState.HoverText.FontFace = ROBOTO_BOLD
+HubState.HoverText.TextSize = 14
+HubState.HoverText.TextStrokeTransparency = 1
+HubState.HoverText.TextXAlignment = Enum.TextXAlignment.Center
 
-HoverToggleBtn.MouseButton1Click:Connect(function()
+HubState.HoverToggleBtn.MouseButton1Click:Connect(function()
 	HubState.HoverToggled = not HubState.HoverToggled
-	HoverToggleBtn.Text = "Hover Name ESP: " .. (HubState.HoverToggled and "ON" or "OFF")
+	HubState.HoverToggleBtn.Text = "Hover Name ESP: " .. (HubState.HoverToggled and "ON" or "OFF")
 	
 	if not HubState.HoverToggled then
-		HoverOutline.Adornee = nil
-		HoverBB.Parent = nil
+		HubState.HoverOutline.Adornee = nil
+		HubState.HoverBB.Parent = nil
 	end
 end)
 
 RunService.RenderStepped:Connect(function()
 	if HubState.HoverToggled then
-		local target = PlayerMouse.Target
+		local target = HubState.PlayerMouse.Target
 		if target and target.Parent then
 			local model = target.Parent
 			local hum = model:FindFirstChildOfClass("Humanoid")
 			
 			if hum then
-				HoverOutline.Adornee = target
-				HoverBB.Parent = model:FindFirstChild("Head") or model:FindFirstChild("HumanoidRootPart")
-				HoverText.Text = model.Name
+				HubState.HoverOutline.Adornee = target
+				HubState.HoverBB.Parent = model:FindFirstChild("Head") or model:FindFirstChild("HumanoidRootPart")
+				HubState.HoverText.Text = model.Name
 			else
-				HoverOutline.Adornee = nil
-				HoverBB.Parent = nil
+				HubState.HoverOutline.Adornee = nil
+				HubState.HoverBB.Parent = nil
 			end
 		else
-			HoverOutline.Adornee = nil
-			HoverBB.Parent = nil
+			HubState.HoverOutline.Adornee = nil
+			HubState.HoverBB.Parent = nil
 		end
 	end
 end)
@@ -3169,8 +3167,8 @@ LocalPlayer.CharacterAdded:Connect(function(newChar)
 		if newHumanoid then
 			HubState.OriginalSpeed = newHumanoid.WalkSpeed
 			HubState.ViewBaselineSpeed = newHumanoid.WalkSpeed
-			if ViewBaselineBox then ViewBaselineBox.Text = tostring(HubState.ViewBaselineSpeed) end
-			if ViewBaselineInfo then ViewBaselineInfo.Text = "Server WalkSpeed / Velocity Cap View\nCurrent: " .. tostring(HubState.ViewBaselineSpeed) end
+			if HubState.ViewBaselineBox then HubState.ViewBaselineBox.Text = tostring(HubState.ViewBaselineSpeed) end
+			if HubState.ViewBaselineInfo then HubState.ViewBaselineInfo.Text = "Server WalkSpeed / Velocity Cap View\nCurrent: " .. tostring(HubState.ViewBaselineSpeed) end
 		end
 		if HubState.LightToggled then updatePlayerLight() end
 		if HubState.SpeedEngineToggled then applySpeedPhysics() end
@@ -3180,35 +3178,35 @@ end)
 -- ==========================================
 -- ⚙️ SECTION 5: SETTINGS & SECURE KEYBINDS
 -- ==========================================
-createSectionHeader("Keybinds", SettingsPage)
-local KeybindContainer = Instance.new("Frame", SettingsPage)
-KeybindContainer.Size = UDim2.new(1, 0, 0, 36)
-KeybindContainer.BackgroundTransparency = 1
+createSectionHeader("Keybinds", HubState.SettingsPage)
+HubState.KeybindContainer = Instance.new("Frame", HubState.SettingsPage)
+HubState.KeybindContainer.Size = UDim2.new(1, 0, 0, 36)
+HubState.KeybindContainer.BackgroundTransparency = 1
 
-local KeybindText = Instance.new("TextLabel", KeybindContainer)
-KeybindText.Size = UDim2.new(0.6, 0, 1, 0)
-KeybindText.BackgroundTransparency = 1
-KeybindText.Text = "Speed Toggle Keybind:"
-KeybindText.TextColor3 = Theme.Text
-KeybindText.FontFace = ROBOTO_BOLD
-KeybindText.TextSize = 11
-KeybindText.TextXAlignment = Enum.TextXAlignment.Left
+HubState.KeybindText = Instance.new("TextLabel", HubState.KeybindContainer)
+HubState.KeybindText.Size = UDim2.new(0.6, 0, 1, 0)
+HubState.KeybindText.BackgroundTransparency = 1
+HubState.KeybindText.Text = "Speed Toggle Keybind:"
+HubState.KeybindText.TextColor3 = Theme.Text
+HubState.KeybindText.FontFace = ROBOTO_BOLD
+HubState.KeybindText.TextSize = 11
+HubState.KeybindText.TextXAlignment = Enum.TextXAlignment.Left
 
-local KeybindBtn = Instance.new("TextButton", KeybindContainer)
-KeybindBtn.Size = UDim2.new(0.38, 0, 1, 0)
-KeybindBtn.Position = UDim2.new(0.62, 0, 0, 0)
-KeybindBtn.BackgroundColor3 = Theme.Surface
-KeybindBtn.BackgroundTransparency = 0.40
-KeybindBtn.BorderSizePixel = 0
-KeybindBtn.Text = HubState.ToggleKeybind.Name
-KeybindBtn.TextColor3 = Theme.Text
-KeybindBtn.FontFace = ROBOTO_BOLD
-KeybindBtn.TextSize = 11
-Instance.new("UICorner", KeybindBtn).CornerRadius = UDim.new(0, 11)
+HubState.KeybindBtn = Instance.new("TextButton", HubState.KeybindContainer)
+HubState.KeybindBtn.Size = UDim2.new(0.38, 0, 1, 0)
+HubState.KeybindBtn.Position = UDim2.new(0.62, 0, 0, 0)
+HubState.KeybindBtn.BackgroundColor3 = Theme.Surface
+HubState.KeybindBtn.BackgroundTransparency = 0.40
+HubState.KeybindBtn.BorderSizePixel = 0
+HubState.KeybindBtn.Text = HubState.ToggleKeybind.Name
+HubState.KeybindBtn.TextColor3 = Theme.Text
+HubState.KeybindBtn.FontFace = ROBOTO_BOLD
+HubState.KeybindBtn.TextSize = 11
+Instance.new("UICorner", HubState.KeybindBtn).CornerRadius = UDim.new(0, 11)
 
-KeybindBtn.MouseButton1Click:Connect(function()
+HubState.KeybindBtn.MouseButton1Click:Connect(function()
 	HubState.IsRebinding = true
-	KeybindBtn.Text = "...Press Any Key..."
+	HubState.KeybindBtn.Text = "...Press Any Key..."
 end)
 
 getgenv().GeminiKeybindConn = UserInputService.InputBegan:Connect(function(input, gpe)
@@ -3216,14 +3214,14 @@ getgenv().GeminiKeybindConn = UserInputService.InputBegan:Connect(function(input
 
 	if HubState.IsRebinding then
 		HubState.ToggleKeybind = input.KeyCode
-		KeybindBtn.Text = input.KeyCode.Name
+		HubState.KeybindBtn.Text = input.KeyCode.Name
 		HubState.IsRebinding = false
 		return
 	end
 
 	if HubState.IsRebindingOpenMenu then
 		HubState.OpenMenuKeybind = input.KeyCode
-		OpenMenuBtn.Text = input.KeyCode.Name
+		HubState.OpenMenuBtn.Text = input.KeyCode.Name
 		HubState.IsRebindingOpenMenu = false
 		return
 	end
@@ -3242,35 +3240,35 @@ getgenv().GeminiKeybindConn = UserInputService.InputBegan:Connect(function(input
 	end
 end)
 
-local OpenMenuContainer = Instance.new("Frame", SettingsPage)
-OpenMenuContainer.Size = UDim2.new(1, 0, 0, 36)
-OpenMenuContainer.BackgroundTransparency = 1
+HubState.OpenMenuContainer = Instance.new("Frame", HubState.SettingsPage)
+HubState.OpenMenuContainer.Size = UDim2.new(1, 0, 0, 36)
+HubState.OpenMenuContainer.BackgroundTransparency = 1
 
-local OpenMenuText = Instance.new("TextLabel", OpenMenuContainer)
-OpenMenuText.Size = UDim2.new(0.6, 0, 1, 0)
-OpenMenuText.BackgroundTransparency = 1
-OpenMenuText.Text = "Menu Toggle Keybind:"
-OpenMenuText.TextColor3 = Theme.Text
-OpenMenuText.FontFace = ROBOTO_BOLD
-OpenMenuText.TextSize = 11
-OpenMenuText.TextXAlignment = Enum.TextXAlignment.Left
+HubState.OpenMenuText = Instance.new("TextLabel", HubState.OpenMenuContainer)
+HubState.OpenMenuText.Size = UDim2.new(0.6, 0, 1, 0)
+HubState.OpenMenuText.BackgroundTransparency = 1
+HubState.OpenMenuText.Text = "Menu Toggle Keybind:"
+HubState.OpenMenuText.TextColor3 = Theme.Text
+HubState.OpenMenuText.FontFace = ROBOTO_BOLD
+HubState.OpenMenuText.TextSize = 11
+HubState.OpenMenuText.TextXAlignment = Enum.TextXAlignment.Left
 
-local OpenMenuBtn = Instance.new("TextButton", OpenMenuContainer)
-OpenMenuBtn.Size = UDim2.new(0.38, 0, 1, 0)
-OpenMenuBtn.Position = UDim2.new(0.62, 0, 0, 0)
-OpenMenuBtn.BackgroundColor3 = Theme.Surface
-OpenMenuBtn.BackgroundTransparency = 0.40
-OpenMenuBtn.BorderSizePixel = 0
-OpenMenuBtn.Text = HubState.OpenMenuKeybind.Name
-OpenMenuBtn.TextColor3 = Theme.Text
-OpenMenuBtn.FontFace = ROBOTO_BOLD
-OpenMenuBtn.TextSize = 11
-OpenMenuBtn.AutoButtonColor = false
-Instance.new("UICorner", OpenMenuBtn).CornerRadius = UDim.new(0, 11)
+HubState.OpenMenuBtn = Instance.new("TextButton", HubState.OpenMenuContainer)
+HubState.OpenMenuBtn.Size = UDim2.new(0.38, 0, 1, 0)
+HubState.OpenMenuBtn.Position = UDim2.new(0.62, 0, 0, 0)
+HubState.OpenMenuBtn.BackgroundColor3 = Theme.Surface
+HubState.OpenMenuBtn.BackgroundTransparency = 0.40
+HubState.OpenMenuBtn.BorderSizePixel = 0
+HubState.OpenMenuBtn.Text = HubState.OpenMenuKeybind.Name
+HubState.OpenMenuBtn.TextColor3 = Theme.Text
+HubState.OpenMenuBtn.FontFace = ROBOTO_BOLD
+HubState.OpenMenuBtn.TextSize = 11
+HubState.OpenMenuBtn.AutoButtonColor = false
+Instance.new("UICorner", HubState.OpenMenuBtn).CornerRadius = UDim.new(0, 11)
 
-OpenMenuBtn.MouseButton1Click:Connect(function()
+HubState.OpenMenuBtn.MouseButton1Click:Connect(function()
 	HubState.IsRebindingOpenMenu = true
-	OpenMenuBtn.Text = "...Press Any Key..."
+	HubState.OpenMenuBtn.Text = "...Press Any Key..."
 end)
 
 local function setMenuVisible(visible)
@@ -3285,46 +3283,46 @@ local function setMenuVisible(visible)
 	end
 end
 
-createSectionHeader("Interface", SettingsPage)
-local UISoundToggleBtn = createButton("Interface Sounds: " .. (HubState.UISoundsEnabled and "ON" or "OFF"), SettingsPage, Theme.Surface)
-UISoundToggleBtn.MouseButton1Click:Connect(function()
+createSectionHeader("Interface", HubState.SettingsPage)
+HubState.UISoundToggleBtn = createButton("Interface Sounds: " .. (HubState.UISoundsEnabled and "ON" or "OFF"), HubState.SettingsPage, Theme.Surface)
+HubState.UISoundToggleBtn.MouseButton1Click:Connect(function()
 	HubState.UISoundsEnabled = not HubState.UISoundsEnabled
-	UISoundToggleBtn.Text = "Interface Sounds: " .. (HubState.UISoundsEnabled and "ON" or "OFF")
+	HubState.UISoundToggleBtn.Text = "Interface Sounds: " .. (HubState.UISoundsEnabled and "ON" or "OFF")
 	refreshStatusIndicator()
 end)
 
-local StatusLabel = Instance.new("TextLabel")
-StatusLabel.Size = UDim2.new(1, 0, 0, 64)
-StatusLabel.BackgroundColor3 = Theme.Surface
-StatusLabel.BackgroundTransparency = 0.40
-StatusLabel.BorderSizePixel = 0
-StatusLabel.TextColor3 = Theme.Text
-StatusLabel.FontFace = ROBOTO_MEDIUM
-StatusLabel.TextSize = 9
-StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
-StatusLabel.TextYAlignment = Enum.TextYAlignment.Center
-StatusLabel.TextWrapped = true
-StatusLabel.Text = ""
-StatusLabel.Parent = SettingsPage
-Instance.new("UICorner", StatusLabel).CornerRadius = UDim.new(0, 10)
-local statusPad = Instance.new("UIPadding")
-statusPad.PaddingLeft = UDim.new(0, 12)
-statusPad.PaddingRight = UDim.new(0, 12)
-statusPad.Parent = StatusLabel
+HubState.StatusLabel = Instance.new("TextLabel")
+HubState.StatusLabel.Size = UDim2.new(1, 0, 0, 64)
+HubState.StatusLabel.BackgroundColor3 = Theme.Surface
+HubState.StatusLabel.BackgroundTransparency = 0.40
+HubState.StatusLabel.BorderSizePixel = 0
+HubState.StatusLabel.TextColor3 = Theme.Text
+HubState.StatusLabel.FontFace = ROBOTO_MEDIUM
+HubState.StatusLabel.TextSize = 9
+HubState.StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+HubState.StatusLabel.TextYAlignment = Enum.TextYAlignment.Center
+HubState.StatusLabel.TextWrapped = true
+HubState.StatusLabel.Text = ""
+HubState.StatusLabel.Parent = HubState.SettingsPage
+Instance.new("UICorner", HubState.StatusLabel).CornerRadius = UDim.new(0, 10)
+HubState.statusPad = Instance.new("UIPadding")
+HubState.statusPad.PaddingLeft = UDim.new(0, 12)
+HubState.statusPad.PaddingRight = UDim.new(0, 12)
+HubState.statusPad.Parent = HubState.StatusLabel
 
 local function refreshStatusIndicator()
 	local waypointMode = WaypointPersistenceMode or "Unavailable"
 	local warningMode = WarningPersistenceMode or "Unavailable"
 	local npcState = HubState.NPCToggled and "ON" or "OFF"
 	local playerState = HubState.PlayerToggled and "ON" or "OFF"
-	StatusLabel.Text = "● Gemini Hub Ready\nUI Sounds: " .. (HubState.UISoundsEnabled and "ON" or "OFF") .. "  •  Waypoints: " .. waypointMode .. "  •  Warnings: " .. warningMode .. "\nNPC ESP: " .. npcState .. "  •  Player ESP: " .. playerState .. "  •  Client-side UI"
-	StatusLabel.TextColor3 = Theme.Text
+	HubState.StatusLabel.Text = "● Gemini Hub Ready\nUI Sounds: " .. (HubState.UISoundsEnabled and "ON" or "OFF") .. "  •  Waypoints: " .. waypointMode .. "  •  Warnings: " .. warningMode .. "\nNPC ESP: " .. npcState .. "  •  Player ESP: " .. playerState .. "  •  Client-side UI"
+	HubState.StatusLabel.TextColor3 = Theme.Text
 end
 refreshStatusIndicator()
 
-createSectionHeader("Maintenance", SettingsPage)
-local PurgeBtn = createButton("Reset & Purge All ESP Instances", SettingsPage, Theme.Surface)
-PurgeBtn.MouseButton1Click:Connect(function()
+createSectionHeader("Maintenance", HubState.SettingsPage)
+HubState.PurgeBtn = createButton("Reset & Purge All ESP Instances", HubState.SettingsPage, Theme.Surface)
+HubState.PurgeBtn.MouseButton1Click:Connect(function()
 	for _, v in pairs(Workspace:GetDescendants()) do
 		if v:IsA("Highlight") and (v.Name == "NPC_HIGHLIGHT" or v.Name == "PLAYER_HIGHLIGHT" or v.Name == "Gemini_Hover_HL") then v:Destroy() end
 		if v:IsA("SelectionBox") and v.Name == "Gemini_Hover_Outline" then v:Destroy() end
@@ -3341,7 +3339,7 @@ RunService.Stepped:Connect(function()
 		local root = char:FindFirstChild("HumanoidRootPart")
 		
 		if hum then
-			ActualSpeedLabel.Text = "Real-Time WalkSpeed: " .. tostring(math.floor(hum.WalkSpeed * 10) / 10)
+			HubState.ActualSpeedLabel.Text = "Real-Time WalkSpeed: " .. tostring(math.floor(hum.WalkSpeed * 10) / 10)
 			if HubState.SpeedEngineToggled then
 				local target = math.min(HubState.OriginalSpeed + HubState.AddedSpeed, HubState.SpeedCap)
 				if hum.WalkSpeed ~= target then hum.WalkSpeed = target end
@@ -3350,28 +3348,45 @@ RunService.Stepped:Connect(function()
 		
 		if root then
 			local realVel = root.AssemblyLinearVelocity.Magnitude
-			VelocityLabel.Text = string.format("Physical Velocity: %.2f studs/s", realVel)
+			HubState.VelocityLabel.Text = string.format("Physical Velocity: %.2f studs/s", realVel)
 			
 			if HubState.BreakVelocityToggled then
 				if HubState.MatchBaseSpeedToggled then
 					local spoofedMag = math.min(realVel, HubState.ViewBaselineSpeed)
-					SpoofedVelLabel.Text = string.format("Spoofed Vel: %.2f studs/s (View Cap %.1f)", spoofedMag, HubState.ViewBaselineSpeed)
+					HubState.SpoofedVelLabel.Text = string.format("Spoofed Vel: %.2f studs/s (View Cap %.1f)", spoofedMag, HubState.ViewBaselineSpeed)
 				else
-					SpoofedVelLabel.Text = "Spoofed Vel: 0.00 studs/s (Static Zero)"
+					HubState.SpoofedVelLabel.Text = "Spoofed Vel: 0.00 studs/s (Static Zero)"
 				end
 			else
-				SpoofedVelLabel.Text = "Spoofed Velocity (Server View): OFF"
+				HubState.SpoofedVelLabel.Text = "Spoofed Velocity (Server View): OFF"
 			end
 		else
-			VelocityLabel.Text = "Physical Velocity: 0.00 studs/s"
-			SpoofedVelLabel.Text = "Spoofed Velocity (Server View): OFF"
+			HubState.VelocityLabel.Text = "Physical Velocity: 0.00 studs/s"
+			HubState.SpoofedVelLabel.Text = "Spoofed Velocity (Server View): OFF"
 		end
 		
-		ServerSpeedLabel.Text = "Server View WalkSpeed: " .. tostring(HubState.ViewBaselineSpeed)
+		HubState.ServerSpeedLabel.Text = "Server View WalkSpeed: " .. tostring(HubState.ViewBaselineSpeed)
 	end
 end)
 
--- Typography baseline: Roboto family, no explicit text strokes.
+
+
+-- ==========================================
+-- 🫧 LIQUID GLASS TAGS (module NOT loaded in this build)
+-- ==========================================
+-- Only the CollectionService tags are applied, so a LiquidGlass module can be
+-- dropped in later without touching the UI. Without the module, tags do nothing.
+for _, target in ipairs({MainFrame, TabBar}) do
+	pcall(function()
+		if not CollectionService:HasTag(target, "LiquidGlass") then
+			CollectionService:AddTag(target, "LiquidGlass")
+		end
+	end)
+end
+
+-- Consistent typography: Roboto family, pure white, no text strokes.
+-- Keep a little hierarchy: larger labels use Roboto Bold, ordinary labels use Regular,
+-- clickable controls use Medium, and editable text uses Regular.
 local function applyCleanTypography(instance)
 	if instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox") then
 		instance.TextStrokeTransparency = 1
@@ -3394,4 +3409,4 @@ ScreenGui.DescendantAdded:Connect(function(descendant)
 	applyCleanTypography(descendant)
 end)
 
-print("💎 Gemini Hub V14.4 Active: Liquid Glass UI • Optimized NPC ESP • Player Warnings • Notifications ❄️💎")
+print("💎 Gemini Hub V14.5 Liquid Glass 3 UI (Xeno build) active ❄️💎")
