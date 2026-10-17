@@ -1,5 +1,7 @@
--- 💎 GEMINI HUB V14.7 - LIQUID GLASS + UI AUDIO + CONTROL POLISH 💎
--- Controlled V14.7 feature build: waypoint text polish, live session monitor, dark mode, and status-card contrast.
+-- 💎 GEMINI HUB V14.5 - LIQUID GLASS 3 (XENO PORT) 💎
+-- Xeno execution/persistence/actions restored from the original executor version.
+-- Liquid Glass 3 visuals and LiquidGlass tags ported from the verified Studio baseline.
+-- The Glass handler module is intentionally NOT loaded in this build.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -9,7 +11,16 @@ local Workspace = game:GetService("Workspace")
 local TweenService = game:GetService("TweenService")
 local SoundService = game:GetService("SoundService")
 local HttpService = game:GetService("HttpService")
+local CollectionService = game:GetService("CollectionService")
 local LocalPlayer = Players.LocalPlayer
+
+-- Liquid Glass integration is intentionally deferred: this port registers the tags
+-- now, but does not load the handler module until a later integration pass.
+local function tagLiquidGlass(instance)
+    if instance and not CollectionService:HasTag(instance, "LiquidGlass") then
+        CollectionService:AddTag(instance, "LiquidGlass")
+    end
+end
 
 -- 🛡️ Safe GUI Parent Finder
 local function getSafeParent()
@@ -375,32 +386,46 @@ ScreenGui.Parent = safeParent
 -- ==========================================
 
 local Theme = {
-	-- Main material
-	Panel = Color3.fromRGB(245, 250, 255),
-	PanelBottom = Color3.fromRGB(215, 235, 255),
+	-- Smoke-glass shell: neutral graphite, not an opaque black panel.
+	Panel = Color3.fromRGB(31, 37, 46),
+	PanelBottom = Color3.fromRGB(19, 25, 33),
 
-	-- Reusable glass surfaces
-	Surface = Color3.fromRGB(240, 248, 255),
-	SurfaceHover = Color3.fromRGB(250, 253, 255),
-	SurfacePressed = Color3.fromRGB(225, 240, 255),
+	-- Content surfaces stay translucent and subdued. These are standard UI
+	-- surfaces; LiquidGlass is reserved for the shell and navigation layer.
+	Surface = Color3.fromRGB(55, 64, 76),
+	SurfaceHover = Color3.fromRGB(75, 87, 101),
+	SurfacePressed = Color3.fromRGB(43, 92, 82),
 
-	-- Accent
-	Accent = Color3.fromRGB(66, 133, 244),
-	AccentSoft = Color3.fromRGB(190, 220, 255),
+	-- iOS-inspired accents: blue for navigation/sliders, green for enabled switches.
+	Accent = Color3.fromRGB(10, 132, 255),
+	AccentSoft = Color3.fromRGB(104, 184, 255),
+	ToggleOn = Color3.fromRGB(48, 209, 88),
+	Danger = Color3.fromRGB(255, 105, 97),
 
-	-- Text
-	Text = Color3.fromRGB(30, 45, 60),
-	TextSecondary = Color3.fromRGB(95, 115, 135),
+	-- Clean, pure-white typography with no text strokes.
+	Text = Color3.fromRGB(255, 255, 255),
+	TextSecondary = Color3.fromRGB(255, 255, 255),
 
 	-- Utility
-	White = Color3.fromRGB(255, 255, 255),
-	Track = Color3.fromRGB(205, 220, 235),
+	White = Color3.fromRGB(248, 250, 255),
+	Track = Color3.fromRGB(92, 103, 118),
 
-	-- Transparency tuning
-	PanelTransparency = 0.18,
-	SurfaceTransparency = 0.30,
-	BorderTransparency = 0.35,
+	-- Keep this translucency tuned for the smoke-glass style. The external
+	-- LiquidGlass handler is intentionally not loaded in this Xeno build.
+	PanelTransparency = 0.42,
+	SurfaceTransparency = 0.46,
+	BorderTransparency = 0.56,
 }
+
+-- User-exported Figma switch tracks. I/O indicators are already part of these images.
+local ON_SWITCH_IMAGE = "rbxassetid://73774684489893"
+local OFF_SWITCH_IMAGE = "rbxassetid://84077478919224"
+local SLIDER_KNOB_IMAGE = "rbxassetid://97296360165887"
+
+-- Built-in Roblox font family; no externally downloaded font is required.
+local ROBOTO_REGULAR = Font.new("rbxasset://fonts/families/Roboto.json", Enum.FontWeight.Regular, Enum.FontStyle.Normal)
+local ROBOTO_MEDIUM = Font.new("rbxasset://fonts/families/Roboto.json", Enum.FontWeight.Medium, Enum.FontStyle.Normal)
+local ROBOTO_BOLD = Font.new("rbxasset://fonts/families/Roboto.json", Enum.FontWeight.Bold, Enum.FontStyle.Normal)
 
 local TweenFast = TweenInfo.new(
 	0.16,
@@ -418,6 +443,8 @@ local TweenSoft = TweenInfo.new(
 -- 🔊 UI SOUND SYSTEM
 -- ==========================================
 -- Short 2D UI sounds are parented to SoundService so they are not positional.
+local oldAudio = SoundService:FindFirstChild("GeminiHub_UIAudio")
+if oldAudio then oldAudio:Destroy() end
 local GeminiHubAudio = Instance.new("Folder")
 GeminiHubAudio.Name = "GeminiHub_UIAudio"
 GeminiHubAudio.Parent = SoundService
@@ -460,12 +487,18 @@ end
 local function hapticPulse(guiObject, scaleObject, strength)
 	if not guiObject or not guiObject.Parent then return end
 	strength = strength or 1.0
-	local targetScale = 1 + (0.018 * strength)
+	local targetScale = 1 + (0.075 * strength)
 	if scaleObject then
-		TweenService:Create(scaleObject, TweenInfo.new(0.07, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Scale = targetScale}):Play()
-		task.delay(0.07, function()
+		-- A clearer springy pop, with a tiny tilt on the switch thumb.
+		local startRotation = guiObject.Rotation
+		TweenService:Create(scaleObject, TweenInfo.new(0.075, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Scale = targetScale}):Play()
+		TweenService:Create(guiObject, TweenInfo.new(0.075, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Rotation = startRotation + (guiObject.Name == "Knob" and 5 * strength or 0)}):Play()
+		task.delay(0.075, function()
 			if scaleObject and scaleObject.Parent then
-				TweenService:Create(scaleObject, TweenInfo.new(0.13, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {Scale = 1}):Play()
+				TweenService:Create(scaleObject, TweenInfo.new(0.16, Enum.EasingStyle.Elastic, Enum.EasingDirection.Out), {Scale = 1}):Play()
+			end
+			if guiObject and guiObject.Parent then
+				TweenService:Create(guiObject, TweenInfo.new(0.16, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Rotation = startRotation}):Play()
 			end
 		end)
 	else
@@ -492,6 +525,7 @@ MainFrame.BackgroundTransparency = Theme.PanelTransparency
 MainFrame.BorderSizePixel = 0
 MainFrame.ClipsDescendants = true
 MainFrame.Parent = ScreenGui
+tagLiquidGlass(MainFrame)
 
 -- 📱 Responsive shell: desktop keeps the original compact size, while touch
 -- devices use a percentage-based footprint so the hub does not swallow the screen.
@@ -532,7 +566,7 @@ HubGradient.Parent = MainFrame
 
 local MainStroke = Instance.new("UIStroke")
 MainStroke.Color = Theme.White
-MainStroke.Transparency = Theme.BorderTransparency
+MainStroke.Transparency = 0.48
 MainStroke.Thickness = 1.25
 MainStroke.Parent = MainFrame
 
@@ -562,7 +596,7 @@ end)
 
 if shadowOk and MainShadow then
 	local configured = pcall(function()
-		MainShadow.Color = Color3.fromRGB(30, 75, 120)
+		MainShadow.Color = Color3.fromRGB(7, 12, 20)
 		MainShadow.Transparency = 0.72
 		MainShadow.BlurRadius = UDim.new(0, 18)
 		MainShadow.Offset = UDim2.new(0, 0, 0, 7)
@@ -585,7 +619,7 @@ TopShine.Name = "TopShine"
 TopShine.Size = UDim2.new(1, -38, 0, 1)
 TopShine.Position = UDim2.new(0, 19, 0, 2)
 TopShine.BackgroundColor3 = Theme.White
-TopShine.BackgroundTransparency = 0.55
+TopShine.BackgroundTransparency = 0.48
 TopShine.BorderSizePixel = 0
 TopShine.ZIndex = 2
 TopShine.Parent = MainFrame
@@ -677,7 +711,7 @@ Title.Position = UDim2.new(0, 18, 0, 10)
 Title.BackgroundTransparency = 1
 Title.Text = "💎  GEMINI HUB"
 Title.TextColor3 = Theme.Text
-Title.Font = Enum.Font.GothamBold
+Title.FontFace = ROBOTO_BOLD
 Title.TextSize = 15
 Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.Parent = TopBar
@@ -686,9 +720,9 @@ local Version = Instance.new("TextLabel")
 Version.Size = UDim2.new(1, -80, 0, 16)
 Version.Position = UDim2.new(0, 20, 0, 31)
 Version.BackgroundTransparency = 1
-Version.Text = "v14.7"
+Version.Text = "v14.1"
 Version.TextColor3 = Theme.TextSecondary
-Version.Font = Enum.Font.Gotham
+Version.FontFace = ROBOTO_REGULAR
 Version.TextSize = 10
 Version.TextXAlignment = Enum.TextXAlignment.Left
 Version.Parent = TopBar
@@ -696,12 +730,12 @@ Version.Parent = TopBar
 local MinMaxBtn = Instance.new("TextButton")
 MinMaxBtn.Size = UDim2.new(0, 30, 0, 30)
 MinMaxBtn.Position = UDim2.new(1, -44, 0, 14)
-MinMaxBtn.BackgroundColor3 = Theme.White
-MinMaxBtn.BackgroundTransparency = 0.55
+MinMaxBtn.BackgroundColor3 = Theme.Surface
+MinMaxBtn.BackgroundTransparency = 0.42
 MinMaxBtn.BorderSizePixel = 0
 MinMaxBtn.Text = "−"
 MinMaxBtn.TextColor3 = Theme.Text
-MinMaxBtn.Font = Enum.Font.GothamMedium
+MinMaxBtn.FontFace = ROBOTO_MEDIUM
 MinMaxBtn.TextSize = 15
 MinMaxBtn.AutoButtonColor = false
 MinMaxBtn.Parent = TopBar
@@ -712,7 +746,7 @@ MinCorner.Parent = MinMaxBtn
 
 local MinStroke = Instance.new("UIStroke")
 MinStroke.Color = Theme.White
-MinStroke.Transparency = 0.35
+MinStroke.Transparency = 0.70
 MinStroke.Thickness = 1
 MinStroke.Parent = MinMaxBtn
 
@@ -905,28 +939,29 @@ local function showNotification(titleText, messageText, duration)
 	local card = Instance.new("Frame")
 	card.Name = "Notification"
 	card.Size = UDim2.new(1, 0, 0, 58)
-	card.BackgroundColor3 = Color3.fromRGB(225, 255, 238)
+	card.BackgroundColor3 = Color3.fromRGB(34, 54, 47)
 	card.BackgroundTransparency = 0.18
 	card.BorderSizePixel = 0
 	card.ClipsDescendants = true
 	card.ZIndex = 51
 	card.Parent = NotificationContainer
+	tagLiquidGlass(card)
 
 	local corner = Instance.new("UICorner")
 	corner.CornerRadius = UDim.new(0, 15)
 	corner.Parent = card
 
 	local stroke = Instance.new("UIStroke")
-	stroke.Color = Color3.fromRGB(175, 255, 205)
+	stroke.Color = Theme.ToggleOn
 	stroke.Transparency = 0.25
 	stroke.Thickness = 1
 	stroke.Parent = card
 
 	local gradient = Instance.new("UIGradient")
 	gradient.Color = ColorSequence.new({
-		ColorSequenceKeypoint.new(0, Color3.fromRGB(240, 255, 246)),
-		ColorSequenceKeypoint.new(0.62, Color3.fromRGB(220, 250, 232)),
-		ColorSequenceKeypoint.new(1, Color3.fromRGB(120, 215, 155)),
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(43, 67, 57)),
+		ColorSequenceKeypoint.new(0.62, Color3.fromRGB(32, 54, 47)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(22, 40, 35)),
 	})
 	gradient.Transparency = NumberSequence.new({
 		NumberSequenceKeypoint.new(0, 0.05),
@@ -939,7 +974,7 @@ local function showNotification(titleText, messageText, duration)
 	local accent = Instance.new("Frame")
 	accent.Size = UDim2.new(0, 4, 1, -16)
 	accent.Position = UDim2.new(0, 7, 0, 8)
-	accent.BackgroundColor3 = Color3.fromRGB(60, 190, 105)
+	accent.BackgroundColor3 = Theme.ToggleOn
 	accent.BorderSizePixel = 0
 	accent.ZIndex = 52
 	accent.Parent = card
@@ -950,8 +985,8 @@ local function showNotification(titleText, messageText, duration)
 	title.Position = UDim2.new(0, 19, 0, 7)
 	title.BackgroundTransparency = 1
 	title.Text = titleText
-	title.TextColor3 = Color3.fromRGB(28, 90, 55)
-	title.Font = Enum.Font.GothamBold
+	title.TextColor3 = Theme.Text
+	title.FontFace = ROBOTO_BOLD
 	title.TextSize = 11
 	title.TextXAlignment = Enum.TextXAlignment.Left
 	title.ZIndex = 52
@@ -962,8 +997,8 @@ local function showNotification(titleText, messageText, duration)
 	message.Position = UDim2.new(0, 19, 0, 27)
 	message.BackgroundTransparency = 1
 	message.Text = messageText
-	message.TextColor3 = Color3.fromRGB(55, 105, 75)
-	message.Font = Enum.Font.GothamMedium
+	message.TextColor3 = Theme.Text
+	message.FontFace = ROBOTO_MEDIUM
 	message.TextSize = 9.5
 	message.TextXAlignment = Enum.TextXAlignment.Left
 	message.TextTruncate = Enum.TextTruncate.AtEnd
@@ -1004,11 +1039,12 @@ local TabBar = Instance.new("Frame")
 TabBar.Name = "TabBar"
 TabBar.Size = UDim2.new(1, -20, 0, 40)
 TabBar.Position = UDim2.new(0, 10, 0, 64)
-TabBar.BackgroundColor3 = Theme.White
-TabBar.BackgroundTransparency = 0.70
+TabBar.BackgroundColor3 = Theme.Surface
+TabBar.BackgroundTransparency = 0.52
 TabBar.BorderSizePixel = 0
 TabBar.ZIndex = 5
 TabBar.Parent = MainFrame
+tagLiquidGlass(TabBar)
 
 local TabCorner = Instance.new("UICorner")
 TabCorner.CornerRadius = UDim.new(0, 14)
@@ -1016,7 +1052,7 @@ TabCorner.Parent = TabBar
 
 local TabStroke = Instance.new("UIStroke")
 TabStroke.Color = Theme.White
-TabStroke.Transparency = 0.52
+TabStroke.Transparency = 0.76
 TabStroke.Thickness = 1
 TabStroke.Parent = TabBar
 
@@ -1052,8 +1088,8 @@ local TabIndicator = Instance.new("Frame")
 TabIndicator.Name = "ActiveTabPill"
 TabIndicator.Size = UDim2.fromOffset(0, 0)
 TabIndicator.Position = UDim2.fromOffset(0, 0)
-TabIndicator.BackgroundColor3 = Theme.White
-TabIndicator.BackgroundTransparency = 0.48
+TabIndicator.BackgroundColor3 = Theme.Accent
+TabIndicator.BackgroundTransparency = 0.56
 TabIndicator.BorderSizePixel = 0
 TabIndicator.ZIndex = 6
 TabIndicator.Parent = TabIndicatorLayer
@@ -1063,8 +1099,8 @@ TabIndicatorCorner.CornerRadius = UDim.new(0, 11)
 TabIndicatorCorner.Parent = TabIndicator
 
 local TabIndicatorStroke = Instance.new("UIStroke")
-TabIndicatorStroke.Color = Theme.White
-TabIndicatorStroke.Transparency = 0.28
+TabIndicatorStroke.Color = Theme.AccentSoft
+TabIndicatorStroke.Transparency = 0.48
 TabIndicatorStroke.Thickness = 1
 TabIndicatorStroke.Parent = TabIndicator
 
@@ -1076,12 +1112,12 @@ local TabIndicatorGradient = Instance.new("UIGradient")
 TabIndicatorGradient.Color = ColorSequence.new({
 	ColorSequenceKeypoint.new(0, Theme.AccentSoft),
 	ColorSequenceKeypoint.new(0.55, Theme.White),
-	ColorSequenceKeypoint.new(1, Theme.AccentSoft),
+	ColorSequenceKeypoint.new(1, Theme.Accent),
 })
 TabIndicatorGradient.Transparency = NumberSequence.new({
-	NumberSequenceKeypoint.new(0, 0.15),
-	NumberSequenceKeypoint.new(0.55, 0.02),
-	NumberSequenceKeypoint.new(1, 0.15),
+	NumberSequenceKeypoint.new(0, 0.30),
+	NumberSequenceKeypoint.new(0.55, 0.46),
+	NumberSequenceKeypoint.new(1, 0.30),
 })
 TabIndicatorGradient.Rotation = 90
 TabIndicatorGradient.Parent = TabIndicator
@@ -1121,7 +1157,7 @@ local function moveTabIndicator(btn, instant)
 end
 
 local function setTabVisual(btn, active, instant)
-	local targetBackground = active and 1 or 0.88
+	local targetBackground = active and 1 or 0.92
 	local targetText = active and Theme.Accent or Theme.TextSecondary
 
 	if instant then
@@ -1171,13 +1207,13 @@ local function createTab(name, _pastelBaseColor)
 	local btn = Instance.new("TextButton")
 	btn.Name = name .. "Tab"
 	btn.Size = UDim2.new(1/6, -4, 0, 32)
-	btn.BackgroundColor3 = Theme.White
-	btn.BackgroundTransparency = 0.88
+	btn.BackgroundColor3 = Theme.Surface
+	btn.BackgroundTransparency = 0.92
 	btn.BorderSizePixel = 0
 	btn.AutoButtonColor = false
 	btn.Text = name
 	btn.TextColor3 = Theme.TextSecondary
-	btn.Font = Enum.Font.GothamMedium
+	btn.FontFace = ROBOTO_MEDIUM
 	btn.TextSize = 10
 	btn.ZIndex = 7
 	btn.Parent = TabBar
@@ -1188,7 +1224,7 @@ local function createTab(name, _pastelBaseColor)
 
 	local btnStroke = Instance.new("UIStroke")
 	btnStroke.Name = "TabStroke"
-	btnStroke.Color = Theme.Accent
+	btnStroke.Color = Theme.AccentSoft
 	btnStroke.Transparency = 1
 	btnStroke.Thickness = 1
 	btnStroke.Parent = btn
@@ -1238,7 +1274,7 @@ local function createTab(name, _pastelBaseColor)
 				btn,
 				TweenFast,
 				{
-					BackgroundTransparency = 0.72,
+					BackgroundTransparency = 0.82,
 					TextColor3 = Theme.Text,
 				}
 			):Play()
@@ -1248,31 +1284,31 @@ local function createTab(name, _pastelBaseColor)
 	btn.MouseLeave:Connect(function()
 		if ActiveTabName ~= name then
 			TweenService:Create(btn, TweenFast, {
-				BackgroundTransparency = 0.88,
+				BackgroundTransparency = 0.92,
 				TextColor3 = Theme.TextSecondary,
 			}):Play()
 		end
 	end)
 
 	btn.MouseButton1Down:Connect(function()
-		TweenService:Create(TabIndicator, TweenFast, {BackgroundTransparency = 0.32}):Play()
+		TweenService:Create(TabIndicator, TweenFast, {BackgroundTransparency = 0.42}):Play()
 		hapticPulse(TabIndicator, TabIndicatorScale, 0.7)
 	end)
 
 	btn.MouseButton1Up:Connect(function()
-		TweenService:Create(TabIndicator, TweenFast, {BackgroundTransparency = 0.48}):Play()
+		TweenService:Create(TabIndicator, TweenFast, {BackgroundTransparency = 0.56}):Play()
 	end)
 
 	btn.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.Touch then
-			TweenService:Create(TabIndicator, TweenFast, {BackgroundTransparency = 0.32}):Play()
+			TweenService:Create(TabIndicator, TweenFast, {BackgroundTransparency = 0.42}):Play()
 			hapticPulse(TabIndicator, TabIndicatorScale, 0.7)
 		end
 	end)
 
 	btn.InputEnded:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.Touch then
-			TweenService:Create(TabIndicator, TweenFast, {BackgroundTransparency = 0.48}):Play()
+			TweenService:Create(TabIndicator, TweenFast, {BackgroundTransparency = 0.56}):Play()
 		end
 	end)
 
@@ -1307,7 +1343,7 @@ local function createSectionHeader(titleText, parent)
 	title.BackgroundTransparency = 1
 	title.Text = titleText
 	title.TextColor3 = Theme.Text
-	title.Font = Enum.Font.GothamBold
+	title.FontFace = ROBOTO_BOLD
 	title.TextSize = 11
 	title.TextXAlignment = Enum.TextXAlignment.Left
 	title.Parent = container
@@ -1316,7 +1352,7 @@ local function createSectionHeader(titleText, parent)
 	line.Size = UDim2.new(1, -145, 0, 1)
 	line.Position = UDim2.new(0, 139, 0.5, 0)
 	line.BackgroundColor3 = Theme.White
-	line.BackgroundTransparency = 0.58
+	line.BackgroundTransparency = 0.80
 	line.BorderSizePixel = 0
 	line.Parent = container
 
@@ -1327,18 +1363,18 @@ local function createButton(text, parent, _pastelColor)
 	local btn = Instance.new("TextButton")
 	btn.Size = UDim2.new(1, 0, 0, 42)
 	btn.BackgroundColor3 = Theme.Surface
-	btn.BackgroundTransparency = 0.34
+	btn.BackgroundTransparency = 0.43
 	btn.BorderSizePixel = 0
 	btn.Text = text
 	btn.TextColor3 = Theme.Text
-	btn.Font = Enum.Font.GothamMedium
+	btn.FontFace = ROBOTO_MEDIUM
 	btn.TextSize = 11
 	btn.TextXAlignment = Enum.TextXAlignment.Left
 	btn.AutoButtonColor = false
 	btn.Parent = parent
 
 	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 12)
+	corner.CornerRadius = UDim.new(0, 15)
 	corner.Parent = btn
 
 	local buttonScale = Instance.new("UIScale")
@@ -1347,43 +1383,111 @@ local function createButton(text, parent, _pastelColor)
 
 	local padding = Instance.new("UIPadding")
 	padding.PaddingLeft = UDim.new(0, 14)
-	padding.PaddingRight = UDim.new(0, 56)
+	-- Reserve room for the wider Apple-style switch track.
+	padding.PaddingRight = UDim.new(0, 98)
 	padding.Parent = btn
 
 	local stroke = Instance.new("UIStroke")
 	stroke.Color = Theme.White
-	stroke.Transparency = 0.55
+	stroke.Transparency = 0.76
 	stroke.Thickness = 1
 	stroke.Parent = btn
 
-	-- Toggle/status capsule. It automatically reacts when existing feature
-	-- code changes btn.Text to an ON/OFF state.
+	-- The existing TextButton remains the click target and keeps all feature callbacks.
+	-- This transparent holder contains only visual layers and mirrors btn.Text's ON/OFF suffix.
 	local status = Instance.new("Frame")
-	status.Name = "StatusPill"
-	status.Size = UDim2.new(0, 38, 0, 20)
-	status.Position = UDim2.new(1, -50, 0.5, -10)
-	status.BackgroundColor3 = Theme.Track
-	status.BackgroundTransparency = 0.20
+	status.Name = "StatusPill" -- Preserve this name for existing lookups elsewhere in the script.
+	status.Size = UDim2.new(0, 70, 0, 29)
+	status.Position = UDim2.new(1, -78, 0.5, -14.5)
+	status.BackgroundTransparency = 1
 	status.BorderSizePixel = 0
 	status.Visible = false
+	status.Active = false
+	status.Selectable = false
 	status.ZIndex = btn.ZIndex + 1
 	status.Parent = btn
 
-	local statusScale = Instance.new("UIScale")
-	statusScale.Name = "StatusPillScale"
-	statusScale.Scale = 1
-	statusScale.Parent = status
 
-	local statusCorner = Instance.new("UICorner")
-	statusCorner.CornerRadius = UDim.new(1, 0)
-	statusCorner.Parent = status
+	local function makeSwitchTrack(name, imageId)
+		local image = Instance.new("ImageLabel")
+		image.Name = name
+		image.Size = UDim2.fromScale(1, 1)
+		image.Position = UDim2.fromScale(0, 0)
+		image.BackgroundTransparency = 1
+		image.BorderSizePixel = 0
+		image.Image = imageId
+		image.ImageTransparency = 0
+		image.ScaleType = Enum.ScaleType.Stretch
+		image.Active = false
+		image.Selectable = false
+		image.ZIndex = status.ZIndex
+		image.Parent = status
+		return image
+	end
 
+	-- Homemade fallback remains behind the exported artwork. If Roblox cannot
+	-- display an uploaded image (permissions/moderation/asset-type issues), the
+	-- toggle remains legible and functional rather than showing only the knob.
+	local fallbackTrack = Instance.new("Frame")
+	fallbackTrack.Name = "FallbackTrack"
+	fallbackTrack.Size = UDim2.fromScale(1, 1)
+	fallbackTrack.BackgroundColor3 = Theme.Track
+	fallbackTrack.BackgroundTransparency = 0
+	fallbackTrack.BorderSizePixel = 0
+	fallbackTrack.ZIndex = status.ZIndex
+	fallbackTrack.Parent = status
+	local fallbackCorner = Instance.new("UICorner")
+	fallbackCorner.CornerRadius = UDim.new(1, 0)
+	fallbackCorner.Parent = fallbackTrack
+	-- Minimal geometric I/O indicators instead of literal letters: a slim bar for I,
+	-- and a thin ring for O. They sit on the side opposite the thumb.
+	local onIndicator = Instance.new("Frame")
+	onIndicator.Name = "OnIndicator"
+	onIndicator.AnchorPoint = Vector2.new(0, 0.5)
+	onIndicator.Size = UDim2.new(0, 1.8, 0, 9)
+	onIndicator.Position = UDim2.new(0, 12, 0.5, 0)
+	onIndicator.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	onIndicator.BackgroundTransparency = 0.08
+	onIndicator.BorderSizePixel = 0
+	onIndicator.ZIndex = status.ZIndex + 1
+	onIndicator.Visible = false
+	onIndicator.Parent = fallbackTrack
+
+	local offIndicator = Instance.new("Frame")
+	offIndicator.Name = "OffIndicator"
+	offIndicator.AnchorPoint = Vector2.new(0.5, 0.5)
+	offIndicator.Size = UDim2.new(0, 7, 0, 7)
+	offIndicator.Position = UDim2.new(1, -12, 0.5, 0)
+	offIndicator.BackgroundTransparency = 1
+	offIndicator.BorderSizePixel = 0
+	offIndicator.ZIndex = status.ZIndex + 1
+	offIndicator.Visible = true
+	offIndicator.Parent = fallbackTrack
+	local offIndicatorCorner = Instance.new("UICorner")
+	offIndicatorCorner.CornerRadius = UDim.new(1, 0)
+	offIndicatorCorner.Parent = offIndicator
+	local offIndicatorStroke = Instance.new("UIStroke")
+	offIndicatorStroke.Color = Color3.fromRGB(255, 255, 255)
+	offIndicatorStroke.Thickness = 1.08
+	offIndicatorStroke.Transparency = 0.12
+	offIndicatorStroke.Parent = offIndicator
+
+	-- These assets already contain the I/O marks and the track's colour/shape.
+	-- Do not add another indicator on the knob. They sit above the fallback.
+	local offTrackImage = makeSwitchTrack("OffTrackImage", OFF_SWITCH_IMAGE)
+	local onTrackImage = makeSwitchTrack("OnTrackImage", ON_SWITCH_IMAGE)
+	onTrackImage.Visible = false
+
+	-- One independent white pill-shaped thumb, with no external decal required.
 	local knob = Instance.new("Frame")
 	knob.Name = "Knob"
-	knob.Size = UDim2.new(0, 14, 0, 14)
-	knob.Position = UDim2.new(0, 3, 0.5, -7)
-	knob.BackgroundColor3 = Theme.White
+	knob.Size = UDim2.new(0, 30, 0, 23)
+	knob.Position = UDim2.new(0, 3, 0.5, -11.5)
+	knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	knob.BackgroundTransparency = 0
 	knob.BorderSizePixel = 0
+	knob.Active = false
+	knob.Selectable = false
 	knob.ZIndex = status.ZIndex + 1
 	knob.Parent = status
 
@@ -1391,21 +1495,30 @@ local function createButton(text, parent, _pastelColor)
 	knobCorner.CornerRadius = UDim.new(1, 0)
 	knobCorner.Parent = knob
 
+	local knobScale = Instance.new("UIScale")
+	knobScale.Name = "KnobWobbleScale"
+	knobScale.Scale = 1
+	knobScale.Parent = knob
+
 	local lastStatus = nil
 	local function updateStatusVisual()
 		local upper = string.upper(btn.Text)
 		-- Only treat an explicit trailing ON/OFF state as a toggle.
-		-- This prevents words such as "MODIFICATIONS" from accidentally
-		-- creating a toggle capsule.
+		-- This preserves the original behaviour for ordinary action buttons.
 		local isOn = string.match(upper, "ON%s*$") ~= nil
 		local isOff = string.match(upper, "OFF%s*$") ~= nil
 
 		status.Visible = isOn or isOff
+		onTrackImage.Visible = isOn
+		offTrackImage.Visible = isOff
+		fallbackTrack.BackgroundColor3 = isOn and Theme.ToggleOn or Theme.Track
+		onIndicator.Visible = isOn
+		offIndicator.Visible = isOff
 
 		local currentStatus = isOn and "ON" or (isOff and "OFF" or nil)
 		if currentStatus and lastStatus and currentStatus ~= lastStatus then
 			playUISound(ToggleSFX)
-			hapticPulse(status, statusScale, 1.0)
+			hapticPulse(knob, knobScale, 1.0)
 		end
 		lastStatus = currentStatus
 
@@ -1413,24 +1526,11 @@ local function createButton(text, parent, _pastelColor)
 			return
 		end
 
-		TweenService:Create(
-			status,
-			TweenFast,
-			{
-				BackgroundColor3 = isOn and Theme.Accent or Theme.Track,
-				BackgroundTransparency = isOn and 0.12 or 0.18,
-			}
-		):Play()
-
-		TweenService:Create(
-			knob,
-			TweenFast,
-			{
-				Position = isOn
-					and UDim2.new(1, -17, 0.5, -7)
-					or UDim2.new(0, 3, 0.5, -7),
-			}
-		):Play()
+		-- Track images switch instantly; the thumb glides to the opposite side of I/O.
+		local targetPosition = isOn
+			and UDim2.new(1, -33, 0.5, -11.5)
+			or UDim2.new(0, 3, 0.5, -11.5)
+		TweenService:Create(knob, TweenFast, {Position = targetPosition}):Play()
 	end
 
 	btn:GetPropertyChangedSignal("Text"):Connect(updateStatusVisual)
@@ -1441,7 +1541,7 @@ local function createButton(text, parent, _pastelColor)
 			btn,
 			TweenFast,
 			{
-				BackgroundTransparency = 0.18,
+				BackgroundTransparency = 0.27,
 				BackgroundColor3 = Theme.SurfaceHover,
 			}
 		):Play()
@@ -1452,20 +1552,19 @@ local function createButton(text, parent, _pastelColor)
 			btn,
 			TweenFast,
 			{
-				BackgroundTransparency = 0.34,
+				BackgroundTransparency = 0.43,
 				BackgroundColor3 = Theme.Surface,
 			}
 		):Play()
 	end)
 
 	local function pressButton()
-		-- Toggle rows already have a moving status capsule, so avoid adding
-		-- the old size-compression animation on top of that UI.
+		-- Toggle rows use their moving thumb instead of the action-button press scale.
 		if status.Visible then return end
 		playUISound(ButtonSFX)
 		hapticPulse(btn, buttonScale, 1.0)
 		TweenService:Create(btn, TweenFast, {
-			BackgroundTransparency = 0.08,
+			BackgroundTransparency = 0.20,
 			BackgroundColor3 = Theme.SurfacePressed,
 		}):Play()
 		TweenService:Create(buttonScale, TweenFast, {Scale = 0.97}):Play()
@@ -1474,7 +1573,7 @@ local function createButton(text, parent, _pastelColor)
 	local function releaseButton()
 		if status.Visible then return end
 		TweenService:Create(btn, TweenFast, {
-			BackgroundTransparency = 0.18,
+			BackgroundTransparency = 0.27,
 			BackgroundColor3 = Theme.SurfaceHover,
 		}):Play()
 		TweenService:Create(buttonScale, TweenFast, {Scale = 1}):Play()
@@ -1504,7 +1603,7 @@ local function createSlider(name, default, minVal, maxVal, parent, callback)
 	label.BackgroundTransparency = 1
 	label.Text = name
 	label.TextColor3 = Theme.Text
-	label.Font = Enum.Font.GothamMedium
+	label.FontFace = ROBOTO_MEDIUM
 	label.TextSize = 10.5
 	label.TextXAlignment = Enum.TextXAlignment.Left
 	label.Parent = container
@@ -1514,16 +1613,16 @@ local function createSlider(name, default, minVal, maxVal, parent, callback)
 	valueLabel.Position = UDim2.new(0.70, 0, 0, 0)
 	valueLabel.BackgroundTransparency = 1
 	valueLabel.TextColor3 = Theme.TextSecondary
-	valueLabel.Font = Enum.Font.GothamMedium
+	valueLabel.FontFace = ROBOTO_MEDIUM
 	valueLabel.TextSize = 10
 	valueLabel.TextXAlignment = Enum.TextXAlignment.Right
 	valueLabel.Parent = container
 
 	local track = Instance.new("TextButton")
-	track.Size = UDim2.new(1, 0, 0, 8)
+	track.Size = UDim2.new(1, 0, 0, 7)
 	track.Position = UDim2.new(0, 0, 0, 31)
 	track.BackgroundColor3 = Theme.Track
-	track.BackgroundTransparency = 0.20
+	track.BackgroundTransparency = 0.12
 	track.BorderSizePixel = 0
 	track.Text = ""
 	track.AutoButtonColor = false
@@ -1546,22 +1645,40 @@ local function createSlider(name, default, minVal, maxVal, parent, callback)
 	fillCorner.CornerRadius = UDim.new(1, 0)
 	fillCorner.Parent = fill
 
-	local knob = Instance.new("Frame")
-	knob.Size = UDim2.new(0, 14, 0, 14)
+	-- Keep the slider thumb horizontal, matching the compact iOS-style control.
+	-- A Roblox Frame remains underneath as a fallback if the image asset does not load.
+	local knobFallback = Instance.new("Frame")
+	knobFallback.Name = "KnobFallback"
+	knobFallback.Size = UDim2.new(0, 22, 0, 14)
+	knobFallback.AnchorPoint = Vector2.new(0.5, 0.5)
+	knobFallback.Position = UDim2.new(initialAlpha, 0, 0.5, 0)
+	knobFallback.BackgroundColor3 = Theme.White
+	knobFallback.BorderSizePixel = 0
+	knobFallback.ZIndex = track.ZIndex + 1
+	knobFallback.Parent = track
+	local fallbackCorner = Instance.new("UICorner")
+	fallbackCorner.CornerRadius = UDim.new(1, 0)
+	fallbackCorner.Parent = knobFallback
+
+	local knob = Instance.new("ImageLabel")
+	knob.Name = "Knob"
+	knob.Size = UDim2.new(0, 22, 0, 14)
 	knob.AnchorPoint = Vector2.new(0.5, 0.5)
 	knob.Position = UDim2.new(initialAlpha, 0, 0.5, 0)
-	knob.BackgroundColor3 = Theme.White
-	knob.BorderSizePixel = 0
+	knob.BackgroundTransparency = 1
+	knob.Image = SLIDER_KNOB_IMAGE
+	knob.ImageColor3 = Theme.White
+	knob.ScaleType = Enum.ScaleType.Stretch
 	knob.ZIndex = track.ZIndex + 2
 	knob.Parent = track
-
 	local knobCorner = Instance.new("UICorner")
 	knobCorner.CornerRadius = UDim.new(1, 0)
 	knobCorner.Parent = knob
 
+
 	local knobStroke = Instance.new("UIStroke")
-	knobStroke.Color = Theme.Accent
-	knobStroke.Transparency = 0.25
+	knobStroke.Color = Color3.fromRGB(228, 234, 242)
+	knobStroke.Transparency = 0.48
 	knobStroke.Thickness = 1
 	knobStroke.Parent = knob
 
@@ -1575,7 +1692,12 @@ local function createSlider(name, default, minVal, maxVal, parent, callback)
 		)
 
 		fill.Size = UDim2.new(relX, 0, 1, 0)
-		knob.Position = UDim2.new(relX, 0, 0.5, 0)
+		local trackWidth = math.max(track.AbsoluteSize.X, 1)
+		local edgeAlpha = (knob.AbsoluteSize.X / 2) / trackWidth
+		local thumbAlpha = math.clamp(relX, edgeAlpha, 1 - edgeAlpha)
+		local thumbPosition = UDim2.new(thumbAlpha, 0, 0.5, 0)
+		knob.Position = thumbPosition
+		knobFallback.Position = thumbPosition
 
 		local val = minVal + (relX * (maxVal - minVal))
 		val = math.floor(val * 10) / 10
@@ -1594,12 +1716,12 @@ local function createSlider(name, default, minVal, maxVal, parent, callback)
 	track.InputBegan:Connect(beginSlider)
 
 	track.MouseEnter:Connect(function()
-		TweenService:Create(knobStroke, TweenFast, {Transparency = 0}):Play()
+		TweenService:Create(knobStroke, TweenFast, {Transparency = 0.18}):Play()
 	end)
 
 	track.MouseLeave:Connect(function()
 		if not sliding then
-			TweenService:Create(knobStroke, TweenFast, {Transparency = 0.25}):Play()
+			TweenService:Create(knobStroke, TweenFast, {Transparency = 0.48}):Play()
 		end
 	end)
 
@@ -1607,7 +1729,7 @@ local function createSlider(name, default, minVal, maxVal, parent, callback)
 		if input.UserInputType == Enum.UserInputType.MouseButton1
 			or input.UserInputType == Enum.UserInputType.Touch then
 			sliding = false
-			TweenService:Create(knobStroke, TweenFast, {Transparency = 0.25}):Play()
+			TweenService:Create(knobStroke, TweenFast, {Transparency = 0.48}):Play()
 		end
 	end)
 
@@ -1642,17 +1764,17 @@ local function create2DColorPicker(titleText, defaultColor, parent, callback)
 	local container = Instance.new("Frame")
 	container.Size = UDim2.new(1, 0, 0, 114)
 	container.BackgroundColor3 = Theme.Surface
-	container.BackgroundTransparency = 0.48
+	container.BackgroundTransparency = 0.54
 	container.BorderSizePixel = 0
 	container.Parent = parent
 
 	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 13)
+	corner.CornerRadius = UDim.new(0, 16)
 	corner.Parent = container
 
 	local border = Instance.new("UIStroke")
 	border.Color = Theme.White
-	border.Transparency = 0.60
+	border.Transparency = 0.78
 	border.Thickness = 1
 	border.Parent = container
 
@@ -1667,7 +1789,7 @@ local function create2DColorPicker(titleText, defaultColor, parent, callback)
 	label.BackgroundTransparency = 1
 	label.Text = titleText
 	label.TextColor3 = Theme.Text
-	label.Font = Enum.Font.GothamMedium
+	label.FontFace = ROBOTO_MEDIUM
 	label.TextSize = 10.5
 	label.TextXAlignment = Enum.TextXAlignment.Left
 	label.Parent = header
@@ -1848,12 +1970,12 @@ createSectionHeader("Watched Players", WarningPage)
 local WarningNameBox = Instance.new("TextBox")
 WarningNameBox.Size = UDim2.new(1, 0, 0, 36)
 WarningNameBox.BackgroundColor3 = Theme.Surface
-WarningNameBox.BackgroundTransparency = 0.28
+WarningNameBox.BackgroundTransparency = 0.42
 WarningNameBox.PlaceholderText = "Enter Roblox username..."
 WarningNameBox.PlaceholderColor3 = Theme.TextSecondary
 WarningNameBox.Text = ""
 WarningNameBox.TextColor3 = Theme.Text
-WarningNameBox.Font = Enum.Font.Gotham
+WarningNameBox.FontFace = ROBOTO_REGULAR
 WarningNameBox.TextSize = 11
 WarningNameBox.ClearTextOnFocus = false
 WarningNameBox.Parent = WarningPage
@@ -1874,7 +1996,7 @@ WarningStatusLabel.Size = UDim2.new(1, 0, 0, 18)
 WarningStatusLabel.BackgroundTransparency = 1
 WarningStatusLabel.Text = "Saved warnings: 0  •  " .. WarningPersistenceMode
 WarningStatusLabel.TextColor3 = Theme.TextSecondary
-WarningStatusLabel.Font = Enum.Font.Gotham
+WarningStatusLabel.FontFace = ROBOTO_REGULAR
 WarningStatusLabel.TextSize = 9
 WarningStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
 WarningStatusLabel.Parent = WarningPage
@@ -1931,7 +2053,7 @@ local function refreshWarningList()
 			label.BackgroundTransparency = 1
 			label.Text = username
 			label.TextColor3 = Theme.Text
-			label.Font = Enum.Font.GothamMedium
+			label.FontFace = ROBOTO_MEDIUM
 			label.TextSize = 10
 			label.TextXAlignment = Enum.TextXAlignment.Left
 			label.Parent = row
@@ -1941,7 +2063,7 @@ local function refreshWarningList()
 			remove.BackgroundTransparency = 1
 			remove.Text = "×"
 			remove.TextColor3 = Theme.TextSecondary
-			remove.Font = Enum.Font.GothamBold
+			remove.FontFace = ROBOTO_BOLD
 			remove.TextSize = 16
 			remove.Parent = row
 			remove.MouseButton1Click:Connect(function()
@@ -2054,7 +2176,7 @@ local function applyHealthBar(character, humanoid, tagPrefix, alwaysOnTop)
 	local bg = Instance.new("Frame")
 	bg.Name = "HealthBackground"
 	bg.Size = UDim2.new(1, 0, 1, 0)
-	bg.BackgroundColor3 = Color3.fromRGB(235, 242, 248)
+	bg.BackgroundColor3 = Color3.fromRGB(34, 42, 52)
 	bg.BackgroundTransparency = 0.18
 	bg.BorderSizePixel = 0
 	bg.Parent = bb
@@ -2073,8 +2195,8 @@ local function applyHealthBar(character, humanoid, tagPrefix, alwaysOnTop)
 	bgGradient.Parent = bg
 
 	local stroke = Instance.new("UIStroke")
-	stroke.Color = Color3.fromRGB(255, 255, 255)
-	stroke.Transparency = 0.30
+	stroke.Color = Theme.White
+	stroke.Transparency = 0.72
 	stroke.Thickness = 1
 	stroke.Parent = bg
 
@@ -2108,10 +2230,9 @@ local function applyHealthBar(character, humanoid, tagPrefix, alwaysOnTop)
 	hpText.BackgroundTransparency = 1
 	hpText.Text = math.floor(humanoid.Health) .. " / " .. math.floor(humanoid.MaxHealth)
 	hpText.TextColor3 = Color3.fromRGB(255, 255, 255)
-	hpText.Font = Enum.Font.GothamBold
+	hpText.FontFace = ROBOTO_BOLD
 	hpText.TextSize = 8
-	hpText.TextStrokeTransparency = 0.48
-	hpText.TextStrokeColor3 = Color3.fromRGB(20, 30, 40)
+	hpText.TextStrokeTransparency = 1
 	hpText.ZIndex = 2
 	hpText.Parent = bg
 
@@ -2353,7 +2474,7 @@ ESPCleanupStatus.Size = UDim2.new(1, 0, 0, 18)
 ESPCleanupStatus.BackgroundTransparency = 1
 ESPCleanupStatus.Text = "Scans for stale Gemini ESP instances only."
 ESPCleanupStatus.TextColor3 = Theme.TextSecondary
-ESPCleanupStatus.Font = Enum.Font.Gotham
+ESPCleanupStatus.FontFace = ROBOTO_REGULAR
 ESPCleanupStatus.TextSize = 9
 ESPCleanupStatus.TextXAlignment = Enum.TextXAlignment.Left
 ESPCleanupStatus.Parent = ESPPage
@@ -2408,12 +2529,12 @@ end)
 local WaypointNameBox = Instance.new("TextBox", WaypointPage)
 WaypointNameBox.Size = UDim2.new(1, 0, 0, 36)
 WaypointNameBox.BackgroundColor3 = Theme.Surface
-WaypointNameBox.BackgroundTransparency = 0.28
+WaypointNameBox.BackgroundTransparency = 0.42
 WaypointNameBox.PlaceholderText = "Enter Waypoint Name..."
 WaypointNameBox.PlaceholderColor3 = Theme.TextSecondary
 WaypointNameBox.Text = ""
 WaypointNameBox.TextColor3 = Theme.Text
-WaypointNameBox.Font = Enum.Font.Gotham
+WaypointNameBox.FontFace = ROBOTO_REGULAR
 WaypointNameBox.TextSize = 11
 Instance.new("UICorner", WaypointNameBox).CornerRadius = UDim.new(0, 10)
 local wpBoxStroke = Instance.new("UIStroke", WaypointNameBox)
@@ -2457,17 +2578,18 @@ local function refreshWaypointList()
 		nameLabel.BackgroundTransparency = 1
 		nameLabel.Text = wpData.Name
 		nameLabel.TextColor3 = Theme.Text
-		nameLabel.Font = Enum.Font.GothamBold
+		nameLabel.FontFace = ROBOTO_BOLD
 		nameLabel.TextSize = 10
 		nameLabel.TextXAlignment = Enum.TextXAlignment.Left
 		
 		local tpBtn = Instance.new("TextButton", row)
 		tpBtn.Size = UDim2.new(0.18, 0, 0.76, 0)
 		tpBtn.Position = UDim2.new(0.61, 0, 0.12, 0)
-		tpBtn.BackgroundColor3 = Theme.AccentSoft
+		tpBtn.BackgroundColor3 = Theme.Accent
+		tpBtn.BackgroundTransparency = 0.12
 		tpBtn.Text = "TP"
-		tpBtn.TextColor3 = Theme.Text
-		tpBtn.Font = Enum.Font.GothamBold
+		tpBtn.TextColor3 = Theme.White
+		tpBtn.FontFace = ROBOTO_BOLD
 		tpBtn.TextSize = 10
 		Instance.new("UICorner", tpBtn).CornerRadius = UDim.new(0, 6)
 		
@@ -2486,7 +2608,7 @@ local function refreshWaypointList()
 		delBtn.BackgroundColor3 = Theme.SurfacePressed
 		delBtn.Text = "X"
 		delBtn.TextColor3 = Theme.Text
-		delBtn.Font = Enum.Font.GothamBold
+		delBtn.FontFace = ROBOTO_BOLD
 		delBtn.TextSize = 10
 		Instance.new("UICorner", delBtn).CornerRadius = UDim.new(0, 6)
 		
@@ -2528,10 +2650,8 @@ local function spawnWaypointWorldUI(wpData)
 	label.Position = UDim2.new(0.5, -20, 0, 32)
 	label.BackgroundTransparency = 1
 	label.Text = wpData.Name
-	label.TextColor3 = Color3.fromRGB(255, 255, 255)
-	label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-	label.TextStrokeTransparency = 0.20
-	label.Font = Enum.Font.GothamBold
+	label.TextColor3 = Theme.Text
+	label.FontFace = ROBOTO_BOLD
 	label.TextSize = 11
 	label.ZIndex = 4
 	
@@ -2540,10 +2660,8 @@ local function spawnWaypointWorldUI(wpData)
 	distLabel.Position = UDim2.new(0.5, -20, 0, 47)
 	distLabel.BackgroundTransparency = 1
 	distLabel.Text = "0m"
-	distLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-	distLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-	distLabel.TextStrokeTransparency = 0.28
-	distLabel.Font = Enum.Font.Gotham
+	distLabel.TextColor3 = Theme.TextSecondary
+	distLabel.FontFace = ROBOTO_REGULAR
 	distLabel.TextSize = 10
 	distLabel.ZIndex = 4
 	
@@ -2611,7 +2729,7 @@ ViewBaselineInfo.Position = UDim2.new(0, 10, 0, 5)
 ViewBaselineInfo.BackgroundTransparency = 1
 ViewBaselineInfo.Text = "Server WalkSpeed / Velocity Cap View\nCurrent: " .. tostring(HubState.ViewBaselineSpeed)
 ViewBaselineInfo.TextColor3 = Theme.TextSecondary
-ViewBaselineInfo.Font = Enum.Font.GothamBold
+ViewBaselineInfo.FontFace = ROBOTO_BOLD
 ViewBaselineInfo.TextSize = 10
 ViewBaselineInfo.TextXAlignment = Enum.TextXAlignment.Left
 ViewBaselineInfo.TextYAlignment = Enum.TextYAlignment.Center
@@ -2619,12 +2737,12 @@ ViewBaselineInfo.TextYAlignment = Enum.TextYAlignment.Center
 local ViewBaselineBox = Instance.new("TextBox", ViewBaselineFrame)
 ViewBaselineBox.Size = UDim2.new(0.28, 0, 0, 30)
 ViewBaselineBox.Position = UDim2.new(0.59, 0, 0, 8)
-ViewBaselineBox.BackgroundColor3 = Theme.White
+ViewBaselineBox.BackgroundColor3 = Theme.Surface
 ViewBaselineBox.BackgroundTransparency = 0.42
 ViewBaselineBox.Text = tostring(HubState.ViewBaselineSpeed)
 ViewBaselineBox.PlaceholderText = "Speed"
 ViewBaselineBox.TextColor3 = Theme.Text
-ViewBaselineBox.Font = Enum.Font.GothamBold
+ViewBaselineBox.FontFace = ROBOTO_BOLD
 ViewBaselineBox.TextSize = 12
 ViewBaselineBox.ClearTextOnFocus = false
 Instance.new("UICorner", ViewBaselineBox).CornerRadius = UDim.new(0, 8)
@@ -2653,8 +2771,8 @@ ActualSpeedLabel.Size = UDim2.new(1, -12, 0, 18)
 ActualSpeedLabel.Position = UDim2.new(0, 10, 0, 6)
 ActualSpeedLabel.BackgroundTransparency = 1
 ActualSpeedLabel.Text = "Real-Time WalkSpeed: 16"
-ActualSpeedLabel.TextColor3 = Theme.Accent
-ActualSpeedLabel.Font = Enum.Font.GothamBold
+ActualSpeedLabel.TextColor3 = Theme.Text
+ActualSpeedLabel.FontFace = ROBOTO_BOLD
 ActualSpeedLabel.TextSize = 11
 ActualSpeedLabel.TextXAlignment = Enum.TextXAlignment.Left
 
@@ -2664,7 +2782,7 @@ VelocityLabel.Position = UDim2.new(0, 10, 0, 26)
 VelocityLabel.BackgroundTransparency = 1
 VelocityLabel.Text = "Physical Velocity: 0.00 studs/s"
 VelocityLabel.TextColor3 = Theme.TextSecondary
-VelocityLabel.Font = Enum.Font.GothamBold
+VelocityLabel.FontFace = ROBOTO_BOLD
 VelocityLabel.TextSize = 11
 VelocityLabel.TextXAlignment = Enum.TextXAlignment.Left
 
@@ -2673,8 +2791,8 @@ SpoofedVelLabel.Size = UDim2.new(1, -12, 0, 18)
 SpoofedVelLabel.Position = UDim2.new(0, 10, 0, 46)
 SpoofedVelLabel.BackgroundTransparency = 1
 SpoofedVelLabel.Text = "Spoofed Velocity (Server View): OFF"
-SpoofedVelLabel.TextColor3 = Theme.Accent
-SpoofedVelLabel.Font = Enum.Font.GothamBold
+SpoofedVelLabel.TextColor3 = Theme.Text
+SpoofedVelLabel.FontFace = ROBOTO_BOLD
 SpoofedVelLabel.TextSize = 11
 SpoofedVelLabel.TextXAlignment = Enum.TextXAlignment.Left
 
@@ -2684,7 +2802,7 @@ ServerSpeedLabel.Position = UDim2.new(0, 10, 0, 66)
 ServerSpeedLabel.BackgroundTransparency = 1
 ServerSpeedLabel.Text = "Server View WalkSpeed: " .. tostring(HubState.ViewBaselineSpeed)
 ServerSpeedLabel.TextColor3 = Theme.TextSecondary
-ServerSpeedLabel.Font = Enum.Font.GothamBold
+ServerSpeedLabel.FontFace = ROBOTO_BOLD
 ServerSpeedLabel.TextSize = 11
 ServerSpeedLabel.TextXAlignment = Enum.TextXAlignment.Left
 
@@ -2693,8 +2811,8 @@ TargetSpeedLabel.Size = UDim2.new(1, -12, 0, 18)
 TargetSpeedLabel.Position = UDim2.new(0, 10, 0, 86)
 TargetSpeedLabel.BackgroundTransparency = 1
 TargetSpeedLabel.Text = "Capped Target Speed: OFF"
-TargetSpeedLabel.TextColor3 = Theme.Accent
-TargetSpeedLabel.Font = Enum.Font.GothamBold
+TargetSpeedLabel.TextColor3 = Theme.Text
+TargetSpeedLabel.FontFace = ROBOTO_BOLD
 TargetSpeedLabel.TextSize = 11
 TargetSpeedLabel.TextXAlignment = Enum.TextXAlignment.Left
 
@@ -2707,21 +2825,21 @@ local AddedLabel = Instance.new("TextLabel", AddedSpeedContainer)
 AddedLabel.Size = UDim2.new(0.6, 0, 1, 0)
 AddedLabel.BackgroundTransparency = 1
 AddedLabel.Text = "Added Speed Value:"
-AddedLabel.TextColor3 = Color3.fromRGB(40, 55, 70)
-AddedLabel.Font = Enum.Font.GothamBold
+AddedLabel.TextColor3 = Theme.Text
+AddedLabel.FontFace = ROBOTO_BOLD
 AddedLabel.TextSize = 11
 AddedLabel.TextXAlignment = Enum.TextXAlignment.Left
 
 local AddedBox = Instance.new("TextBox", AddedSpeedContainer)
 AddedBox.Size = UDim2.new(0.38, 0, 1, 0)
 AddedBox.Position = UDim2.new(0.62, 0, 0, 0)
-AddedBox.BackgroundColor3 = Color3.fromRGB(235, 245, 255)
-AddedBox.BackgroundTransparency = 0.35
+AddedBox.BackgroundColor3 = Theme.Surface
+AddedBox.BackgroundTransparency = 0.42
 AddedBox.Text = tostring(HubState.AddedSpeed)
-AddedBox.TextColor3 = Color3.fromRGB(30, 45, 60)
-AddedBox.Font = Enum.Font.GothamBold
+AddedBox.TextColor3 = Theme.Text
+AddedBox.FontFace = ROBOTO_BOLD
 AddedBox.TextSize = 12
-Instance.new("UICorner", AddedBox).CornerRadius = UDim.new(0, 8)
+Instance.new("UICorner", AddedBox).CornerRadius = UDim.new(0, 11)
 
 local CapContainer = Instance.new("Frame", SpeedPage)
 CapContainer.Size = UDim2.new(1, 0, 0, 36)
@@ -2731,21 +2849,21 @@ local CapLabel = Instance.new("TextLabel", CapContainer)
 CapLabel.Size = UDim2.new(0.6, 0, 1, 0)
 CapLabel.BackgroundTransparency = 1
 CapLabel.Text = "Hard Speed Safety Cap:"
-CapLabel.TextColor3 = Color3.fromRGB(40, 55, 70)
-CapLabel.Font = Enum.Font.GothamBold
+CapLabel.TextColor3 = Theme.Text
+CapLabel.FontFace = ROBOTO_BOLD
 CapLabel.TextSize = 11
 CapLabel.TextXAlignment = Enum.TextXAlignment.Left
 
 local CapBox = Instance.new("TextBox", CapContainer)
 CapBox.Size = UDim2.new(0.38, 0, 1, 0)
 CapBox.Position = UDim2.new(0.62, 0, 0, 0)
-CapBox.BackgroundColor3 = Color3.fromRGB(235, 245, 255)
-CapBox.BackgroundTransparency = 0.35
+CapBox.BackgroundColor3 = Theme.Surface
+CapBox.BackgroundTransparency = 0.42
 CapBox.Text = tostring(HubState.SpeedCap)
-CapBox.TextColor3 = Color3.fromRGB(30, 45, 60)
-CapBox.Font = Enum.Font.GothamBold
+CapBox.TextColor3 = Theme.Text
+CapBox.FontFace = ROBOTO_BOLD
 CapBox.TextSize = 12
-Instance.new("UICorner", CapBox).CornerRadius = UDim.new(0, 8)
+Instance.new("UICorner", CapBox).CornerRadius = UDim.new(0, 11)
 
 local ApplySpeedBtn = createButton("Apply Speed Modifications", SpeedPage, Color3.fromRGB(210, 235, 255))
 local ApplySpeedStatus = ApplySpeedBtn:FindFirstChild("StatusPill")
@@ -3011,9 +3129,9 @@ local HoverText = Instance.new("TextLabel", HoverBB)
 HoverText.Size = UDim2.new(1, 0, 1, 0)
 HoverText.BackgroundTransparency = 1
 HoverText.TextColor3 = Color3.fromRGB(255, 255, 255)
-HoverText.Font = Enum.Font.GothamBold
+HoverText.FontFace = ROBOTO_BOLD
 HoverText.TextSize = 14
-HoverText.TextStrokeTransparency = 0.35
+HoverText.TextStrokeTransparency = 1
 HoverText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 HoverText.TextXAlignment = Enum.TextXAlignment.Center
 
@@ -3077,7 +3195,7 @@ KeybindText.Size = UDim2.new(0.6, 0, 1, 0)
 KeybindText.BackgroundTransparency = 1
 KeybindText.Text = "Speed Toggle Keybind:"
 KeybindText.TextColor3 = Theme.Text
-KeybindText.Font = Enum.Font.GothamBold
+KeybindText.FontFace = ROBOTO_BOLD
 KeybindText.TextSize = 11
 KeybindText.TextXAlignment = Enum.TextXAlignment.Left
 
@@ -3085,13 +3203,13 @@ local KeybindBtn = Instance.new("TextButton", KeybindContainer)
 KeybindBtn.Size = UDim2.new(0.38, 0, 1, 0)
 KeybindBtn.Position = UDim2.new(0.62, 0, 0, 0)
 KeybindBtn.BackgroundColor3 = Theme.Surface
-KeybindBtn.BackgroundTransparency = 0.28
+KeybindBtn.BackgroundTransparency = 0.40
 KeybindBtn.BorderSizePixel = 0
 KeybindBtn.Text = HubState.ToggleKeybind.Name
 KeybindBtn.TextColor3 = Theme.Text
-KeybindBtn.Font = Enum.Font.GothamBold
+KeybindBtn.FontFace = ROBOTO_BOLD
 KeybindBtn.TextSize = 11
-Instance.new("UICorner", KeybindBtn).CornerRadius = UDim.new(0, 8)
+Instance.new("UICorner", KeybindBtn).CornerRadius = UDim.new(0, 11)
 
 KeybindBtn.MouseButton1Click:Connect(function()
 	HubState.IsRebinding = true
@@ -3138,7 +3256,7 @@ OpenMenuText.Size = UDim2.new(0.6, 0, 1, 0)
 OpenMenuText.BackgroundTransparency = 1
 OpenMenuText.Text = "Menu Toggle Keybind:"
 OpenMenuText.TextColor3 = Theme.Text
-OpenMenuText.Font = Enum.Font.GothamBold
+OpenMenuText.FontFace = ROBOTO_BOLD
 OpenMenuText.TextSize = 11
 OpenMenuText.TextXAlignment = Enum.TextXAlignment.Left
 
@@ -3146,14 +3264,14 @@ local OpenMenuBtn = Instance.new("TextButton", OpenMenuContainer)
 OpenMenuBtn.Size = UDim2.new(0.38, 0, 1, 0)
 OpenMenuBtn.Position = UDim2.new(0.62, 0, 0, 0)
 OpenMenuBtn.BackgroundColor3 = Theme.Surface
-OpenMenuBtn.BackgroundTransparency = 0.28
+OpenMenuBtn.BackgroundTransparency = 0.40
 OpenMenuBtn.BorderSizePixel = 0
 OpenMenuBtn.Text = HubState.OpenMenuKeybind.Name
 OpenMenuBtn.TextColor3 = Theme.Text
-OpenMenuBtn.Font = Enum.Font.GothamBold
+OpenMenuBtn.FontFace = ROBOTO_BOLD
 OpenMenuBtn.TextSize = 11
 OpenMenuBtn.AutoButtonColor = false
-Instance.new("UICorner", OpenMenuBtn).CornerRadius = UDim.new(0, 8)
+Instance.new("UICorner", OpenMenuBtn).CornerRadius = UDim.new(0, 11)
 
 OpenMenuBtn.MouseButton1Click:Connect(function()
 	HubState.IsRebindingOpenMenu = true
@@ -3182,11 +3300,11 @@ end)
 
 local StatusLabel = Instance.new("TextLabel")
 StatusLabel.Size = UDim2.new(1, 0, 0, 64)
-StatusLabel.BackgroundColor3 = Color3.fromRGB(92, 145, 112)
-StatusLabel.BackgroundTransparency = 0.10
+StatusLabel.BackgroundColor3 = Theme.Surface
+StatusLabel.BackgroundTransparency = 0.40
 StatusLabel.BorderSizePixel = 0
 StatusLabel.TextColor3 = Theme.Text
-StatusLabel.Font = Enum.Font.GothamMedium
+StatusLabel.FontFace = ROBOTO_MEDIUM
 StatusLabel.TextSize = 9
 StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
 StatusLabel.TextYAlignment = Enum.TextYAlignment.Center
@@ -3205,220 +3323,10 @@ local function refreshStatusIndicator()
 	local npcState = HubState.NPCToggled and "ON" or "OFF"
 	local playerState = HubState.PlayerToggled and "ON" or "OFF"
 	StatusLabel.Text = "● Gemini Hub Ready\nUI Sounds: " .. (HubState.UISoundsEnabled and "ON" or "OFF") .. "  •  Waypoints: " .. waypointMode .. "  •  Warnings: " .. warningMode .. "\nNPC ESP: " .. npcState .. "  •  Player ESP: " .. playerState .. "  •  Client-side UI"
-	StatusLabel.TextColor3 = Color3.fromRGB(245, 255, 248)
+	StatusLabel.TextColor3 = Theme.Text
 end
 refreshStatusIndicator()
 
--- ==========================================
--- 📡 LIVE SESSION MONITOR
--- ==========================================
-local SessionStartTime = os.clock()
-
-createSectionHeader("Live Session", SettingsPage)
-
-local SessionStatusLabel = Instance.new("TextLabel")
-SessionStatusLabel.Size = UDim2.new(1, 0, 0, 58)
-SessionStatusLabel.BackgroundColor3 = Theme.Surface
-SessionStatusLabel.BackgroundTransparency = 0.35
-SessionStatusLabel.BorderSizePixel = 0
-SessionStatusLabel.TextColor3 = Theme.Text
-SessionStatusLabel.Font = Enum.Font.GothamMedium
-SessionStatusLabel.TextSize = 9
-SessionStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
-SessionStatusLabel.TextYAlignment = Enum.TextYAlignment.Center
-SessionStatusLabel.TextWrapped = true
-SessionStatusLabel.Parent = SettingsPage
-Instance.new("UICorner", SessionStatusLabel).CornerRadius = UDim.new(0, 10)
-
-local sessionPad = Instance.new("UIPadding")
-sessionPad.PaddingLeft = UDim.new(0, 12)
-sessionPad.PaddingRight = UDim.new(0, 12)
-sessionPad.Parent = SessionStatusLabel
-
-local function formatSessionUptime()
-	local elapsed = math.max(0, math.floor(os.clock() - SessionStartTime))
-	local hours = math.floor(elapsed / 3600)
-	local minutes = math.floor((elapsed % 3600) / 60)
-	local seconds = elapsed % 60
-
-	if hours > 0 then
-		return string.format("%dh %02dm %02ds", hours, minutes, seconds)
-	elseif minutes > 0 then
-		return string.format("%dm %02ds", minutes, seconds)
-	else
-		return string.format("%ds", seconds)
-	end
-end
-
-local function refreshSessionMonitor()
-	SessionStatusLabel.Text =
-		"● Session Active\n" ..
-		"Players: " .. tostring(#Players:GetPlayers()) ..
-		"  •  Gemini Hub Uptime: " .. formatSessionUptime()
-end
-
-refreshSessionMonitor()
-
-Players.PlayerAdded:Connect(function()
-	task.defer(refreshSessionMonitor)
-end)
-
-Players.PlayerRemoving:Connect(function()
-	task.defer(refreshSessionMonitor)
-end)
-
-task.spawn(function()
-	while ScreenGui.Parent do
-		refreshSessionMonitor()
-		task.wait(1)
-	end
-end)
-
--- ==========================================
--- 🌙 DARK MODE
--- ==========================================
-local LightTheme = {
-	Panel = Color3.fromRGB(245, 250, 255),
-	PanelBottom = Color3.fromRGB(215, 235, 255),
-	Surface = Color3.fromRGB(240, 248, 255),
-	SurfaceHover = Color3.fromRGB(250, 253, 255),
-	SurfacePressed = Color3.fromRGB(225, 240, 255),
-	Accent = Color3.fromRGB(66, 133, 244),
-	AccentSoft = Color3.fromRGB(190, 220, 255),
-	Text = Color3.fromRGB(30, 45, 60),
-	TextSecondary = Color3.fromRGB(95, 115, 135),
-	White = Color3.fromRGB(255, 255, 255),
-	Track = Color3.fromRGB(205, 220, 235),
-	PanelTransparency = 0.18,
-	SurfaceTransparency = 0.30,
-	BorderTransparency = 0.35,
-}
-
-local DarkTheme = {
-	Panel = Color3.fromRGB(25, 31, 39),
-	PanelBottom = Color3.fromRGB(14, 19, 26),
-	Surface = Color3.fromRGB(39, 47, 58),
-	SurfaceHover = Color3.fromRGB(51, 60, 72),
-	SurfacePressed = Color3.fromRGB(31, 39, 49),
-	Accent = Color3.fromRGB(94, 160, 255),
-	AccentSoft = Color3.fromRGB(66, 92, 125),
-	Text = Color3.fromRGB(240, 245, 250),
-	TextSecondary = Color3.fromRGB(165, 178, 193),
-	White = Color3.fromRGB(235, 241, 248),
-	Track = Color3.fromRGB(76, 88, 103),
-	PanelTransparency = 0.12,
-	SurfaceTransparency = 0.22,
-	BorderTransparency = 0.28,
-}
-
-local DarkModeEnabled = false
-
-local function copyThemeValues(source)
-	for key, value in pairs(source) do
-		Theme[key] = value
-	end
-end
-
-local function recolorByPalette(oldTheme)
-	for _, obj in ipairs(MainFrame:GetDescendants()) do
-		if obj:IsA("GuiObject") then
-			if obj.BackgroundColor3 == oldTheme.Panel then
-				obj.BackgroundColor3 = Theme.Panel
-			elseif obj.BackgroundColor3 == oldTheme.PanelBottom then
-				obj.BackgroundColor3 = Theme.PanelBottom
-			elseif obj.BackgroundColor3 == oldTheme.Surface then
-				obj.BackgroundColor3 = Theme.Surface
-			elseif obj.BackgroundColor3 == oldTheme.SurfaceHover then
-				obj.BackgroundColor3 = Theme.SurfaceHover
-			elseif obj.BackgroundColor3 == oldTheme.SurfacePressed then
-				obj.BackgroundColor3 = Theme.SurfacePressed
-			elseif obj.BackgroundColor3 == oldTheme.AccentSoft then
-				obj.BackgroundColor3 = Theme.AccentSoft
-			elseif obj.BackgroundColor3 == oldTheme.Track then
-				obj.BackgroundColor3 = Theme.Track
-			elseif obj.BackgroundColor3 == oldTheme.White and obj ~= TopShine then
-				obj.BackgroundColor3 = Theme.SurfaceHover
-			end
-
-			if obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox") then
-				if obj.TextColor3 == oldTheme.Text then
-					obj.TextColor3 = Theme.Text
-				elseif obj.TextColor3 == oldTheme.TextSecondary then
-					obj.TextColor3 = Theme.TextSecondary
-				elseif obj.TextColor3 == oldTheme.White then
-					obj.TextColor3 = Theme.White
-				end
-			end
-		elseif obj:IsA("UIStroke") then
-			if obj.Color == oldTheme.White then
-				obj.Color = Theme.White
-			elseif obj.Color == oldTheme.Accent then
-				obj.Color = Theme.Accent
-			end
-		end
-	end
-
-	MainFrame.BackgroundColor3 = Theme.Panel
-	MainFrame.BackgroundTransparency = Theme.PanelTransparency
-	MainStroke.Color = Theme.White
-	MainStroke.Transparency = Theme.BorderTransparency
-	TopShine.BackgroundColor3 = Theme.White
-
-	HubGradient.Color = ColorSequence.new({
-		ColorSequenceKeypoint.new(0, Theme.Panel),
-		ColorSequenceKeypoint.new(0.55, Theme.Panel),
-		ColorSequenceKeypoint.new(1, Theme.PanelBottom),
-	})
-
-	if DarkModeEnabled then
-		MainStrokeGradient.Color = ColorSequence.new({
-			ColorSequenceKeypoint.new(0, Color3.fromRGB(235, 241, 248)),
-			ColorSequenceKeypoint.new(0.48, Color3.fromRGB(95, 110, 128)),
-			ColorSequenceKeypoint.new(1, Color3.fromRGB(235, 241, 248)),
-		})
-		MainStrokeGradient.Transparency = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0.10),
-			NumberSequenceKeypoint.new(0.48, 0.34),
-			NumberSequenceKeypoint.new(1, 0.10),
-		})
-		StatusLabel.BackgroundColor3 = Color3.fromRGB(40, 86, 57)
-		StatusLabel.TextColor3 = Color3.fromRGB(235, 255, 241)
-	else
-		MainStrokeGradient.Color = ColorSequence.new({
-			ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
-			ColorSequenceKeypoint.new(0.48, Color3.fromRGB(125, 145, 165)),
-			ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 255)),
-		})
-		MainStrokeGradient.Transparency = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0.12),
-			NumberSequenceKeypoint.new(0.48, 0.38),
-			NumberSequenceKeypoint.new(1, 0.12),
-		})
-		StatusLabel.BackgroundColor3 = Color3.fromRGB(92, 145, 112)
-		StatusLabel.TextColor3 = Color3.fromRGB(245, 255, 248)
-	end
-
-	SessionStatusLabel.BackgroundColor3 = Theme.Surface
-	SessionStatusLabel.TextColor3 = Theme.Text
-end
-
-local DarkModeBtn = createButton("Dark Mode: OFF", SettingsPage, Theme.Surface)
-DarkModeBtn.MouseButton1Click:Connect(function()
-	local oldTheme = {}
-	for key, value in pairs(Theme) do
-		oldTheme[key] = value
-	end
-
-	DarkModeEnabled = not DarkModeEnabled
-	copyThemeValues(DarkModeEnabled and DarkTheme or LightTheme)
-	recolorByPalette(oldTheme)
-
-	DarkModeBtn.Text = "Dark Mode: " .. (DarkModeEnabled and "ON" or "OFF")
-end)
-
--- ==========================================
--- 🧹 MAINTENANCE
--- ==========================================
 createSectionHeader("Maintenance", SettingsPage)
 local PurgeBtn = createButton("Reset & Purge All ESP Instances", SettingsPage, Theme.Surface)
 PurgeBtn.MouseButton1Click:Connect(function()
@@ -3468,4 +3376,27 @@ RunService.Stepped:Connect(function()
 	end
 end)
 
-print("💎 Gemini Hub V14.7 Active: Liquid Glass UI • Waypoint Polish • Live Session • Dark Mode ❄️💎")
+-- Typography baseline: Roboto family, no explicit text strokes.
+local function applyCleanTypography(instance)
+	if instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox") then
+		instance.TextStrokeTransparency = 1
+		instance.TextStrokeColor3 = instance.TextColor3
+		if instance:IsA("TextButton") then
+			instance.FontFace = ROBOTO_MEDIUM
+		elseif instance:IsA("TextBox") then
+			instance.FontFace = ROBOTO_REGULAR
+		elseif instance.TextSize >= 15 then
+			instance.FontFace = ROBOTO_BOLD
+		else
+			instance.FontFace = ROBOTO_REGULAR
+		end
+	end
+end
+for _, descendant in ipairs(ScreenGui:GetDescendants()) do
+	applyCleanTypography(descendant)
+end
+ScreenGui.DescendantAdded:Connect(function(descendant)
+	applyCleanTypography(descendant)
+end)
+
+print("💎 Gemini Hub V14.5 Liquid Glass 3 Xeno port active • executor persistence/actions retained • LiquidGlass tags only ❄️💎")
