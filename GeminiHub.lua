@@ -4417,7 +4417,7 @@ local function buildUIBlur()
 			}
 
 			self._MainPlane.CFrame = planeCFrame
-			if mainPlaneSizes.X <= 0.01 or mainPlaneSizes.Y <= 0.01 then
+			if mainPlaneSizes.X <= scaleFactor or mainPlaneSizes.Y <= scaleFactor then
 				self._MainPlane.Transparency = 1
 			else
 				self._MainPlane.Size = Vector3.new(mainPlaneSizes.X, mainPlaneSizes.Y)
