@@ -3884,8 +3884,8 @@ do
 		HubState.LiquidGlass = glassOrErr
 		getgenv().GeminiLiquidGlass = glassOrErr
 		-- Shell + navigation get glass; notification cards are handled in showNotification.
-		HubState.ApplyGlass(MainFrame)
-		-- HubState.ApplyGlass(TabBar)
+		-- HubState.ApplyGlass(MainFrame)
+		 HubState.ApplyGlass(TabBar)
 	else
 		warn("Gemini Hub Liquid Glass: could not start (" .. tostring(glassOrErr) .. "). The hub works normally without it.")
 	end
