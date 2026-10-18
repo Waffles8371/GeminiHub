@@ -2,7 +2,8 @@
 -- Xeno-compatible build: executor GUI parent (gethui/CoreGui), getgenv state, executor filesystem persistence,
 -- and the original metatable hooks, combined with the Liquid Glass 3 UI redesign. 'LiquidGlass' tags are kept
 -- on the shell/tab bar/notification cards, and the LiquidGlassHandler module (by @7eoeb / @UNIVERSECORNUCOPIA)
--- is embedded near the bottom of this file, ported for Xeno.
+-- is embedded near the bottom of this file, ported for Xeno. The same goes for the Objectual UI Blur module
+-- (by Tavikron), which blurs the card frames on every tab page.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -44,6 +45,14 @@ if getgenv().GeminiLiquidGlass then
 		getgenv().GeminiLiquidGlass.Destroy()
 	end)
 	getgenv().GeminiLiquidGlass = nil
+end
+
+-- 🧊 Remove the previous run's UI Blur layer (meshes, render hooks, DepthOfField)
+if getgenv().GeminiUIBlur then
+	pcall(function()
+		getgenv().GeminiUIBlur.Destroy()
+	end)
+	getgenv().GeminiUIBlur = nil
 end
 
 -- 📂 Waypoint Folder Setup
@@ -118,6 +127,27 @@ function HubState.ApplyGlass(guiObject)
 		end
 		if HubState.LiquidGlass then
 			HubState.LiquidGlass.new(guiObject)
+		end
+	end)
+end
+
+-- 🧊 UI Blur hook: gives a GuiObject a BlurEffect child (that is how the module is told what to blur)
+-- and, once the module has loaded, builds the blur right away. Works before the module exists too.
+HubState.UIBlur = nil
+function HubState.ApplyBlur(guiObject)
+	pcall(function()
+		local effect = guiObject:FindFirstChildWhichIsA("BlurEffect")
+		if not effect then
+			effect = Instance.new("BlurEffect")
+			effect.Name = "UIBlur"
+			effect.Parent = guiObject
+		end
+		if HubState.UIBlur then
+			HubState.UIBlur.new(guiObject, {
+				Fragmented = effect:GetAttribute("Fragmented"),
+				Inverted = effect:GetAttribute("Inverted"),
+				StrokeSize = effect:GetAttribute("StrokeSize"),
+			})
 		end
 	end)
 end
@@ -3861,6 +3891,650 @@ do
 	end
 end
 
+-- ==========================================
+-- 🧊 UI BLUR (embedded, Xeno port)
+-- ==========================================
+-- Objectual UI Blur [1.2 / REVISION 2] by Tavikron (Octav) / SomeFedoraGuy.
+-- Original resource: https://devforum.roblox.com/t/3626057
+-- Creator Store: https://create.roblox.com/store/asset/85845405321888
+--
+-- The author's module (UIBlur + Utilities), flattened into one function so an executor can run it
+-- (no Explorer, no ModuleScripts, no `script` object). Changes for the executor are marked [XENO PORT].
+--
+-- How it works: a near-invisible Glass-material mesh is laid over a GuiObject and a DepthOfField
+-- effect blurs what is behind it. Add a BlurEffect instance inside any GuiObject to blur it.
+-- Optional attributes on that BlurEffect: Fragmented (bool), Inverted (bool), StrokeSize (number).
+-- Setting the BlurEffect's Enabled to false switches that blur off.
+
+-- ==========================================
+-- ⚙️ UI BLUR SETTINGS  (edit the values below)
+-- ==========================================
+local UIBlurSettings = {
+	-- Transparency of the blur meshes. Very close to 1 on purpose (0.98 is the author's value).
+	Transparency = 0.98,
+
+	-- Distance (studs) of the blur layer from the camera. Leave as is unless the blur looks wrong.
+	Depth = 0.02,
+
+	-- Defaults for BlurEffects that do not set these attributes themselves.
+	DefaultFragmented = false,  -- true = little "sunlight" shimmer using displaced geometry
+	DefaultInverted = false,    -- true = inverts the colours behind the frame (best on square frames)
+	StrokeSize = 0,             -- grows the blur beyond the frame edge; 1 = same size as the frame
+
+	-- The author's blur only works at Roblox graphics quality 8 or higher (Esc > Settings > Graphics).
+	RequireQuality = true,
+	MinQualityLevel = 8,
+	-- "Automatic" graphics counts as quality 0, which the original would reject. true = allow it.
+	AllowAutomaticQuality = true,
+
+	-- [XENO PORT] The blur is a 3D mesh, so it cannot be cropped like UI is. true = a blur is
+	-- hidden whenever its frame is not fully visible (scrolled partly out, window minimised...).
+	HideWhenClipped = true,
+
+	-- [XENO PORT] Pixel nudge added to every blur position. If blurs sit slightly off from their
+	-- frames, try Vector2.new(0, 58) or Vector2.new(0, -58).
+	ExtraOffset = Vector2.new(0, 0),
+}
+
+local function buildUIBlur()
+	local RunService = game:GetService("RunService")
+	local Lighting = game:GetService("Lighting")
+	local GuiService = game:GetService("GuiService")
+	local AssetService = game:GetService("AssetService")
+
+	local Settings = UIBlurSettings
+	local Camera = workspace.CurrentCamera
+	local Offset = Settings.Depth
+
+	-- [XENO PORT] bookkeeping so the whole module can be torn down cleanly
+	local active = {}
+	local connections = {}
+	local Container = nil
+	local InvertedInstances = 0
+	local warned = {}
+
+	local function warnOnce(message)
+		message = tostring(message)
+		if warned[message] then return end
+		warned[message] = true
+		warn("Gemini Hub UI Blur: " .. message)
+	end
+
+	-- [XENO PORT] Our own names ("GeminiUIBlur") so a game's own UIBlur objects are never touched.
+	pcall(function()
+		local old = Lighting:FindFirstChild("GeminiUIBlur")
+		if old then old:Destroy() end
+	end)
+	pcall(function()
+		local old = Camera and Camera:FindFirstChild("GeminiUIBlur")
+		if old then old:Destroy() end
+	end)
+
+	local InvertedContainer = Instance.new("Model")
+	InvertedContainer.Name = "Inverted"
+
+	local DepthOfField = Instance.new("DepthOfFieldEffect")
+	DepthOfField.Name = "GeminiUIBlur"
+	DepthOfField.FarIntensity = 0
+	DepthOfField.FocusDistance = 0
+	DepthOfField.InFocusRadius = 0
+	DepthOfField.NearIntensity = 1
+	DepthOfField.Parent = Lighting
+
+	-- [XENO PORT] PreRender is preferred, RenderStepped is the fallback on older clients.
+	local renderEvent = RunService.RenderStepped
+	pcall(function()
+		if RunService.PreRender then
+			renderEvent = RunService.PreRender
+		end
+	end)
+
+	-- ---------- [XENO PORT] graphics quality (original: UserSettings().GameSettings) ----------
+	local qualityPass = true
+	local GameSettings = nil
+	pcall(function()
+		GameSettings = UserSettings().GameSettings
+	end)
+
+	local function refreshQuality()
+		qualityPass = true
+		if not Settings.RequireQuality or not GameSettings then return end
+		local ok, level = pcall(function()
+			return GameSettings.SavedQualityLevel.Value
+		end)
+		if not ok then return end
+		if level == 0 then
+			qualityPass = Settings.AllowAutomaticQuality
+		else
+			qualityPass = level >= Settings.MinQualityLevel
+		end
+	end
+	refreshQuality()
+	if GameSettings then
+		pcall(function()
+			table.insert(connections, GameSettings:GetPropertyChangedSignal("SavedQualityLevel"):Connect(refreshQuality))
+		end)
+	end
+
+	table.insert(connections, workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+		Camera = workspace.CurrentCamera
+		if Container and Camera then
+			Container.Parent = Camera
+		end
+	end))
+
+	-- ---------- [XENO PORT] template meshes ----------
+	-- In Studio these 4 MeshParts sit inside the model (script.Normal / script.Fragmented).
+	-- A Lua file can't carry MeshParts, so they are rebuilt from the same mesh asset IDs.
+	local MESH_IDS = {
+		Normal = { Corner = 99074379768397, Plane = 71290362392750 },
+		Fragmented = { Corner = 116663952860129, Plane = 91153403946406 },
+	}
+
+	local function createMeshPart(assetId)
+		local part = nil
+
+		-- 1) Official API (newer Content signature)
+		pcall(function()
+			part = AssetService:CreateMeshPartAsync(Content.fromAssetId(assetId))
+		end)
+		-- 2) Official API (older string signature)
+		if not part then
+			pcall(function()
+				part = AssetService:CreateMeshPartAsync("rbxassetid://" .. tostring(assetId))
+			end)
+		end
+		-- 3) Executor fallback: write MeshId directly
+		if not part then
+			local p = Instance.new("MeshPart")
+			local okSet = pcall(function()
+				p.MeshId = "rbxassetid://" .. tostring(assetId)
+			end)
+			if okSet and p.MeshId ~= "" then
+				part = p
+			else
+				p:Destroy()
+			end
+		end
+
+		return part
+	end
+
+	local templates = { Normal = {}, Fragmented = {} }
+
+	local function getTemplate(kind, name)
+		local existing = templates[kind][name]
+		if existing then return existing end
+
+		local part = createMeshPart(MESH_IDS[kind][name])
+		if not part then
+			error("Could not create the " .. kind .. " '" .. name .. "' blur mesh (asset " .. tostring(MESH_IDS[kind][name]) .. "). The asset may be unavailable.")
+		end
+		part.Name = name
+		local props = {
+			Anchored = true,
+			CanCollide = false,
+			CanQuery = false,
+			CanTouch = false,
+			CastShadow = false,
+			Reflectance = 0,
+			Color = Color3.fromRGB(163, 162, 165),
+		}
+		for key, value in pairs(props) do
+			pcall(function()
+				part[key] = value
+			end)
+		end
+		templates[kind][name] = part
+		return part
+	end
+
+	local function cloneMesh(kind, name)
+		local mesh = getTemplate(kind, name):Clone()
+		mesh.Material = Enum.Material.Glass
+		return mesh
+	end
+
+	-- The default (non-fragmented) meshes are needed right away; fragmented ones load on first use.
+	getTemplate("Normal", "Plane")
+	getTemplate("Normal", "Corner")
+
+	-- ---------- Utilities module ----------
+	local Utilities = {}
+
+	-- [XENO PORT] Same projection the LiquidGlass layer uses in this hub (viewport ray + GUI inset),
+	-- so blur and glass line up with the UI in exactly the same way.
+	function Utilities.ProjectIn3D(camera, vector, depth)
+		local inset = GuiService:GetGuiInset()
+		local ray = camera:ViewportPointToRay(
+			vector.X + inset.X + Settings.ExtraOffset.X,
+			vector.Y + inset.Y + Settings.ExtraOffset.Y,
+			depth
+		)
+		return ray.Origin + ray.Direction * depth
+	end
+
+	function Utilities.MapStrokeSize(stroke)
+		return stroke * 0.2
+	end
+
+	-- [XENO PORT] Returns the corner DIAMETER in pixels (the original's convention). The original
+	-- only read CornerRadius.Scale and ignored .Offset, so UICorners set in pixels (like this hub's)
+	-- came out square. It also honours the object's own UIScale (the hub's hover animation).
+	function Utilities.GetCornerRadius(uiCorner)
+		local parent = uiCorner.Parent
+		local size = parent.AbsoluteSize
+		local minSide = math.min(size.X, size.Y)
+		local cornerRadius = uiCorner.CornerRadius
+		local scale = 1
+		local uiScale = parent:FindFirstChildWhichIsA("UIScale")
+		if uiScale then
+			scale = uiScale.Scale
+		end
+		local radius = math.clamp(cornerRadius.Scale * minSide + cornerRadius.Offset * scale, 0, minSide / 2)
+		return radius * 2
+	end
+
+	local function findScreenGui(object)
+		local current = object.Parent
+		for _ = 1, 100 do
+			if not current or current == game then return nil end
+			if current:IsA("ScreenGui") then
+				return current
+			end
+			current = current.Parent
+		end
+		return nil
+	end
+
+	-- [XENO PORT] The original only checked the object's own .Visible. This also walks the ancestors
+	-- (hidden tab pages, disabled ScreenGui) and, optionally, hides the blur while the frame is
+	-- clipped, because a 3D mesh can't be cropped by a ScrollingFrame / ClipsDescendants.
+	local function isShown(guiObject, screenGui)
+		if not guiObject.Visible or not screenGui.Enabled then
+			return false
+		end
+
+		local pos = guiObject.AbsolutePosition
+		local size = guiObject.AbsoluteSize
+		if size.X < 1 or size.Y < 1 then
+			return false
+		end
+
+		local minX, minY = pos.X, pos.Y
+		local maxX, maxY = pos.X + size.X, pos.Y + size.Y
+
+		local current = guiObject.Parent
+		while current and current ~= screenGui do
+			if current:IsA("GuiObject") then
+				if not current.Visible then
+					return false
+				end
+				if Settings.HideWhenClipped and (current.ClipsDescendants or current:IsA("ScrollingFrame")) then
+					local cPos = current.AbsolutePosition
+					local cSize = current.AbsoluteSize
+					if minX < cPos.X - 1 or minY < cPos.Y - 1 or maxX > cPos.X + cSize.X + 1 or maxY > cPos.Y + cSize.Y + 1 then
+						return false
+					end
+				end
+			end
+			current = current.Parent
+		end
+
+		return true
+	end
+
+	local function getContainer()
+		if not Container or not Container.Parent then
+			Container = Instance.new("Folder")
+			Container.Name = "GeminiUIBlur"
+			Container.Parent = Camera
+			InvertedContainer.Parent = Container
+		end
+		return Container
+	end
+
+	local function generateInverter()
+		if not InvertedContainer:FindFirstChild("Inverter") then
+			local highlight = Instance.new("Highlight")
+			highlight.Name = "Inverter"
+			highlight.Adornee = InvertedContainer
+			highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+			highlight.FillColor = Color3.new(0.5, 0.5, 0.5)
+			highlight.FillTransparency = -1
+			highlight.OutlineColor = Color3.new(0, 0, 0)
+			highlight.OutlineTransparency = 1
+			highlight.Parent = InvertedContainer
+		end
+	end
+
+	-- ---------- UIBlur class (original logic) ----------
+	local UIBlur = {}
+	UIBlur.__index = UIBlur
+
+	local function pick(value, default)
+		if value == nil then
+			return default
+		end
+		return value
+	end
+
+	function UIBlur.new(guiObject, arguments)
+		if not guiObject or not guiObject:IsA("GuiObject") then return nil end
+		if active[guiObject] then return active[guiObject] end -- [XENO PORT] never two blurs on one object
+
+		local screenGui = findScreenGui(guiObject)
+		if not screenGui then return nil end -- original: assert(...) must be inside a ScreenGui
+
+		arguments = arguments or {}
+		local args = {
+			Fragmented = pick(arguments.Fragmented, Settings.DefaultFragmented) and true or false,
+			Inverted = pick(arguments.Inverted, Settings.DefaultInverted) and true or false,
+			StrokeSize = Utilities.MapStrokeSize(pick(arguments.StrokeSize, Settings.StrokeSize)),
+		}
+		local kind = args.Fragmented and "Fragmented" or "Normal"
+
+		local self = setmetatable({}, UIBlur)
+		self._GuiObject = guiObject
+		self._Arguments = args
+		self._Kind = kind
+		self._Transparency = Settings.Transparency
+		self._IsRendering = true
+		self._Shown = nil
+		self._UICorner = guiObject:FindFirstChildWhichIsA("UICorner")
+		self._BlurEffect = guiObject:FindFirstChildWhichIsA("BlurEffect")
+		self._ScreenGui = screenGui
+		self._Connections = {}
+		self._Planes = {}  -- up, right, down, left
+		self._Corners = {} -- top left, top right, bottom right, bottom left
+		self._MainPlane = cloneMesh(kind, "Plane")
+		self._Model = Instance.new("Model")
+
+		table.insert(self._Connections, guiObject.ChildAdded:Connect(function(object)
+			if object:IsA("UICorner") then
+				self._UICorner = object
+				self:SetCornered(true) -- [XENO PORT] build the corner meshes if the UICorner shows up later
+			end
+		end))
+		table.insert(self._Connections, guiObject.ChildRemoved:Connect(function(object)
+			if object:IsA("UICorner") and object == self._UICorner then
+				self._UICorner = nil
+				self:SetCornered(false)
+			end
+		end))
+		table.insert(self._Connections, renderEvent:Connect(function()
+			-- [XENO PORT] a failing update disables only this blur instead of erroring every frame
+			local ok, err = pcall(self._Update, self)
+			if not ok then
+				self._IsRendering = false
+				warnOnce(err)
+			end
+		end))
+		table.insert(self._Connections, guiObject.AncestryChanged:Connect(function(_, parent)
+			if not parent then
+				self:Destroy()
+			end
+		end))
+
+		if args.Inverted then
+			InvertedInstances += 1
+			if InvertedInstances == 1 then
+				generateInverter()
+			end
+		end
+
+		self._MainPlane.Parent = self._Model
+		self._Model.Name = guiObject.Name
+		self._Model.PrimaryPart = self._MainPlane
+		self:SetCornered(self._UICorner ~= nil)
+
+		active[guiObject] = self
+		return self
+	end
+
+	function UIBlur.SetCornered(self, cornered)
+		if cornered then
+			if #self._Planes > 0 then return end -- [XENO PORT] already built
+			for _ = 1, 4 do
+				local mesh = cloneMesh(self._Kind, "Plane")
+				table.insert(self._Planes, mesh)
+				mesh.Parent = self._Model
+			end
+			for _ = 1, 4 do
+				local mesh = cloneMesh(self._Kind, "Corner")
+				table.insert(self._Corners, mesh)
+				mesh.Parent = self._Model
+			end
+		else
+			for _, group in ipairs({ self._Planes, self._Corners }) do
+				for _, mesh in ipairs(group) do
+					mesh:Destroy()
+				end
+			end
+			table.clear(self._Planes)
+			table.clear(self._Corners)
+		end
+	end
+
+	function UIBlur.SetStrokeSize(self, strokeSize)
+		self._Arguments.StrokeSize = Utilities.MapStrokeSize(strokeSize)
+	end
+
+	function UIBlur.Destroy(self)
+		if self._Destroyed then return end -- [XENO PORT] safe to call twice
+		self._Destroyed = true
+		active[self._GuiObject] = nil
+
+		for _, connection in ipairs(self._Connections) do
+			connection:Disconnect()
+		end
+		self._Model:Destroy()
+
+		-- [XENO PORT] the original tested self._Inverted, which is never set, so the counter never dropped.
+		if self._Arguments.Inverted then
+			InvertedInstances -= 1
+		end
+		if InvertedInstances <= 0 then
+			InvertedInstances = 0
+			InvertedContainer:ClearAllChildren()
+		end
+	end
+
+	function UIBlur._UpdateCorners(self, cornerOffset, size3D)
+		cornerOffset /= 2
+		for _, corner in ipairs(self._Corners) do
+			corner.Size = Vector3.new(cornerOffset, cornerOffset)
+			corner.PivotOffset = CFrame.new(cornerOffset / 2, cornerOffset / 2, 0)
+		end
+
+		local rightVector = self._MainPlane.CFrame.RightVector
+		local upVector = self._MainPlane.CFrame.UpVector
+
+		self._Corners[1]:PivotTo(self._MainPlane.CFrame + rightVector * size3D.X / 2 + upVector * size3D.Y / 2)
+		self._Corners[2]:PivotTo((self._MainPlane.CFrame - rightVector * size3D.X / 2 + upVector * size3D.Y / 2) * CFrame.Angles(0, 0, math.pi / 2))
+		self._Corners[3]:PivotTo((self._MainPlane.CFrame - rightVector * size3D.X / 2 - upVector * size3D.Y / 2) * CFrame.Angles(0, 0, math.pi))
+		self._Corners[4]:PivotTo((self._MainPlane.CFrame + rightVector * size3D.X / 2 - upVector * size3D.Y / 2) * CFrame.Angles(0, 0, -math.pi / 2))
+	end
+
+	function UIBlur._UpdateSidePlanes(self, cornerOffset, size3D)
+		local rightVector = self._MainPlane.CFrame.RightVector
+		local upVector = self._MainPlane.CFrame.UpVector
+
+		cornerOffset /= 2
+
+		self._Planes[1].Size = Vector3.new(cornerOffset, size3D.Y - cornerOffset * 2)
+		self._Planes[2].Size = Vector3.new(size3D.X - cornerOffset * 2, cornerOffset)
+		self._Planes[3].Size = self._Planes[1].Size
+		self._Planes[4].Size = self._Planes[2].Size
+
+		self._Planes[1].CFrame = self._MainPlane.CFrame + rightVector * (size3D.X / 2 - cornerOffset / 2)
+		self._Planes[2].CFrame = self._MainPlane.CFrame + upVector * (size3D.Y / 2 - cornerOffset / 2)
+		self._Planes[3].CFrame = self._MainPlane.CFrame - rightVector * (size3D.X / 2 - cornerOffset / 2)
+		self._Planes[4].CFrame = self._MainPlane.CFrame - upVector * (size3D.Y / 2 - cornerOffset / 2)
+	end
+
+	function UIBlur._Update(self)
+		local guiObject = self._GuiObject
+		local effect = self._BlurEffect
+		if effect and not effect.Parent then
+			effect = nil
+			self._BlurEffect = nil
+		end
+
+		local wanted = self._IsRendering and qualityPass and Camera ~= nil and (not effect or effect.Enabled)
+		local shown = wanted and isShown(guiObject, self._ScreenGui)
+
+		-- [XENO PORT] hidden blurs are parked outside the workspace instead of being updated every frame
+		if not shown then
+			if self._Shown ~= false then
+				self._Shown = false
+				self._Model.Parent = nil
+			end
+			return
+		end
+		if self._Shown ~= true then
+			self._Shown = true
+			self._Model.Parent = self._Arguments.Inverted and InvertedContainer or getContainer()
+		end
+
+		local guiPos, guiSize = guiObject.AbsolutePosition, guiObject.AbsoluteSize
+		local center = Utilities.ProjectIn3D(Camera, guiPos + guiSize / 2, Offset)
+		local scaleFactor = (6.8 + self._Arguments.StrokeSize) * Offset * math.tan(math.rad(Camera.FieldOfView / 2)) * 2 / Camera.ViewportSize.Y
+
+		self._MainPlane.Transparency = self._Transparency
+
+		local planeCFrame = CFrame.new(center, center - Camera.CFrame.LookVector) * CFrame.Angles(0, 0, math.rad(guiObject.AbsoluteRotation))
+
+		if not self._UICorner or #self._Corners ~= 4 then
+			self._MainPlane.CFrame = planeCFrame
+			self._MainPlane.Size = Vector3.new(guiSize.X * scaleFactor, guiSize.Y * scaleFactor)
+		else
+			local cornerOffset = Utilities.GetCornerRadius(self._UICorner) * scaleFactor
+			local size3D = Vector2.new(guiSize.X * scaleFactor, guiSize.Y * scaleFactor)
+			local mainPlaneSizes = {
+				X = size3D.X - cornerOffset,
+				Y = size3D.Y - cornerOffset,
+			}
+
+			self._MainPlane.CFrame = planeCFrame
+			if mainPlaneSizes.X <= 0.01 or mainPlaneSizes.Y <= 0.01 then
+				self._MainPlane.Transparency = 1
+			else
+				self._MainPlane.Size = Vector3.new(mainPlaneSizes.X, mainPlaneSizes.Y)
+			end
+
+			for _, group in ipairs({ self._Planes, self._Corners }) do
+				for _, mesh in ipairs(group) do
+					mesh.Transparency = self._Transparency
+				end
+			end
+
+			self:_UpdateCorners(cornerOffset, size3D)
+			self:_UpdateSidePlanes(cornerOffset, size3D)
+		end
+	end
+
+	-- ---------- Objectual creation: BlurEffect inside a GuiObject ----------
+	local function generateForBlurEffect(object)
+		if object:IsA("BlurEffect") and object.Parent and object.Parent:IsA("GuiObject") then
+			local ok, err = pcall(UIBlur.new, object.Parent, {
+				Fragmented = object:GetAttribute("Fragmented"),
+				Inverted = object:GetAttribute("Inverted"),
+				StrokeSize = object:GetAttribute("StrokeSize"),
+			})
+			if not ok then
+				warnOnce(err)
+			end
+		end
+	end
+
+	-- ---------- Public module ----------
+	local Module = {}
+
+	Module.new = UIBlur.new
+
+	-- [XENO PORT] The original scanned Players.LocalPlayer.PlayerGui. An executor UI lives in
+	-- gethui()/CoreGui, so the ScreenGui to watch is passed in instead.
+	function Module.Watch(root)
+		for _, object in ipairs(root:GetDescendants()) do
+			generateForBlurEffect(object)
+		end
+		table.insert(connections, root.DescendantAdded:Connect(function(object)
+			task.defer(generateForBlurEffect, object) -- deferred so attributes set after parenting are seen
+		end))
+	end
+
+	-- [XENO PORT] Tear everything down (used when the hub is executed again).
+	function Module.Destroy()
+		for _, connection in ipairs(connections) do
+			pcall(function() connection:Disconnect() end)
+		end
+		table.clear(connections)
+		for _, blur in pairs(active) do
+			pcall(function() blur:Destroy() end)
+		end
+		pcall(function() DepthOfField:Destroy() end)
+		pcall(function() if Container then Container:Destroy() end end)
+		pcall(function() InvertedContainer:Destroy() end)
+		for _, group in pairs(templates) do
+			for _, part in pairs(group) do
+				pcall(function() part:Destroy() end)
+			end
+		end
+	end
+
+	return Module
+end
+
+-- ==========================================
+-- 🧊 UI BLUR LOADER
+-- ==========================================
+-- If anything goes wrong here (mesh assets unavailable, API missing...), the hub keeps working
+-- exactly as before, just without the blur layer.
+do
+	local BLUR_CARDS = true -- set to false to turn the blur off for the tab pages entirely
+
+	local okBlur, blurOrErr = pcall(buildUIBlur)
+	if okBlur and type(blurOrErr) == "table" then
+		HubState.UIBlur = blurOrErr
+		getgenv().GeminiUIBlur = blurOrErr
+
+		-- Any GuiObject in the hub that contains a BlurEffect gets blurred (the module's "objectual" mode).
+		blurOrErr.Watch(ScreenGui)
+
+		-- Which frames get a blur: the cards on every tab page (toggle rows, buttons, text box, color
+		-- pickers...), meaning direct children of a page that have a visible background and rounded
+		-- corners. MainFrame and TabBar are NOT blurred: they keep the LiquidGlass look.
+		-- Edit this one function to choose different frames.
+		local function isBlurCard(object)
+			return object:IsA("GuiObject")
+				and object.BackgroundTransparency < 0.99
+				and object:FindFirstChildWhichIsA("UICorner") ~= nil
+		end
+
+		if BLUR_CARDS then
+			for _, pageData in pairs(Containers) do
+				local page = pageData.Page
+				for _, child in ipairs(page:GetChildren()) do
+					if isBlurCard(child) then
+						HubState.ApplyBlur(child)
+					end
+				end
+				-- controls added to a page later (for example new Pins entries) are covered too
+				page.ChildAdded:Connect(function(child)
+					task.defer(function()
+						if isBlurCard(child) then
+							HubState.ApplyBlur(child)
+						end
+					end)
+				end)
+			end
+		end
+	else
+		warn("Gemini Hub UI Blur: could not start (" .. tostring(blurOrErr) .. "). The hub works normally without it.")
+	end
+end
+
 -- Consistent typography: Roboto family, pure white, no text strokes.
 -- Keep a little hierarchy: larger labels use Roboto Bold, ordinary labels use Regular,
 -- clickable controls use Medium, and editable text uses Regular.
@@ -3886,4 +4560,4 @@ ScreenGui.DescendantAdded:Connect(function(descendant)
 	applyCleanTypography(descendant)
 end)
 
-print("💎 Gemini Hub V14.5 Liquid Glass 3 UI (Xeno build + glass layer) active ❄️💎")
+print("💎 Gemini Hub V14.5 Liquid Glass 3 UI (Xeno build + glass + blur layers) active ❄️💎")
