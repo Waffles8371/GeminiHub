@@ -3451,7 +3451,7 @@ local function buildLiquidGlass()
 		Mesh = {
 			Material = Enum.Material.Glass,
 			Color = Color3.fromRGB(0, 0, 0),
-			Transparency = 2.5,
+			Transparency = 2.8,
 			Anchored = true,
 			CastShadow = false,
 			CanCollide = false,
