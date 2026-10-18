@@ -3885,7 +3885,7 @@ do
 		getgenv().GeminiLiquidGlass = glassOrErr
 		-- Shell + navigation get glass; notification cards are handled in showNotification.
 		HubState.ApplyGlass(MainFrame)
-		HubState.ApplyGlass(TabBar)
+		-- HubState.ApplyGlass(TabBar)
 	else
 		warn("Gemini Hub Liquid Glass: could not start (" .. tostring(glassOrErr) .. "). The hub works normally without it.")
 	end
@@ -4501,7 +4501,7 @@ do
 
 		-- Any GuiObject in the hub that contains a BlurEffect gets blurred (the module's "objectual" mode).
 		blurOrErr.Watch(ScreenGui)
-
+        HubState.ApplyBlur(MainFrame)
 		-- Which frames get a blur: the cards on every tab page (toggle rows, buttons, text box, color
 		-- pickers...), meaning direct children of a page that have a visible background and rounded
 		-- corners. MainFrame and TabBar are NOT blurred: they keep the LiquidGlass look.
