@@ -55,6 +55,34 @@ if getgenv().GeminiUIBlur then
 	getgenv().GeminiUIBlur = nil
 end
 
+-- 🛑 Put the previous run's systems to sleep. Re-executing the hub destroys the old GUI, but the old
+-- run's render loop and metatable hooks stay alive in the game. If its Speed Engine was ON, they would
+-- keep forcing WalkSpeed even though the new window says OFF. Turning the old flags off makes them
+-- pass-through only, and the speed the old run was forcing is put back first.
+do
+	local previousState = getgenv().GeminiHubState
+	if previousState then
+		pcall(function()
+			if previousState.SpeedEngineToggled then
+				local char = LocalPlayer.Character
+				local hum = char and char:FindFirstChildOfClass("Humanoid")
+				if hum then hum.WalkSpeed = previousState.OriginalSpeed end
+			end
+		end)
+		previousState.SpeedEngineToggled = false
+		previousState.BreakVelocityToggled = false
+
+		if previousState.ShiftLockToggled then
+			previousState.ShiftLockToggled = false
+			pcall(function()
+				if previousState.ShiftLockConn then previousState.ShiftLockConn:Disconnect() end
+				LocalPlayer.DevEnableMouseLock = (previousState.ShiftLockPrev == true)
+			end)
+		end
+		getgenv().GeminiHubState = nil
+	end
+end
+
 -- 📂 Waypoint Folder Setup
 -- The waypoint objects themselves are client-side visuals. Rebuild this folder
 -- from the saved waypoint data each time the hub is loaded so old visual copies
@@ -116,6 +144,9 @@ local HubState = {
 	-- UI Controls
 	UISoundsEnabled = true,
 }
+
+-- Lets the next execution of the hub find this run's state (see the 🛑 block near the top).
+getgenv().GeminiHubState = HubState
 
 -- 🫧 Liquid Glass hook: tags a GuiObject and, once the handler has loaded, builds its glass overlay.
 -- Works before the handler exists too (the tag alone is picked up when the handler starts).
@@ -3053,6 +3084,55 @@ HubState.ResetPlayerBtn.MouseButton1Click:Connect(function()
 	end
 end)
 
+-- 🔒 Shift Lock: same idea as Infinite Yield's "enableshiftlock". Roblox only lets players use Shift Lock
+-- when the game allows it (Player.DevEnableMouseLock). This switches that permission on for this player;
+-- the game's own camera script then does the rest, so Shift (or the mobile button) toggles the lock.
+HubState.ShiftLockToggled = false
+HubState.ShiftLockPrev = nil
+HubState.ShiftLockConn = nil
+HubState.ShiftLockBtn = createButton("Enable Shift Lock: OFF", HubState.OthersPage, Theme.Surface)
+
+local function setShiftLockAllowed(state)
+	-- pcall: the property is deprecated by Roblox, so a failure must never break the hub
+	return pcall(function()
+		LocalPlayer.DevEnableMouseLock = state
+	end)
+end
+
+HubState.ShiftLockBtn.MouseButton1Click:Connect(function()
+	if not HubState.ShiftLockToggled then
+		local okRead, previous = pcall(function()
+			return LocalPlayer.DevEnableMouseLock
+		end)
+		if not okRead then
+			pcall(showNotification, "Shift Lock", "This game does not expose the Shift Lock setting.", 4)
+			return
+		end
+
+		HubState.ShiftLockPrev = previous
+		HubState.ShiftLockToggled = true
+		setShiftLockAllowed(true)
+
+		-- If the game switches the permission off again while this toggle is ON, switch it back on.
+		HubState.ShiftLockConn = LocalPlayer:GetPropertyChangedSignal("DevEnableMouseLock"):Connect(function()
+			if HubState.ShiftLockToggled and LocalPlayer.DevEnableMouseLock ~= true then
+				setShiftLockAllowed(true)
+			end
+		end)
+
+		pcall(showNotification, "Shift Lock", "Enabled. Press Shift to lock/unlock (on mobile, use the lock button if it appears).", 5)
+	else
+		HubState.ShiftLockToggled = false
+		if HubState.ShiftLockConn then
+			HubState.ShiftLockConn:Disconnect()
+			HubState.ShiftLockConn = nil
+		end
+		setShiftLockAllowed(HubState.ShiftLockPrev == true)
+	end
+
+	HubState.ShiftLockBtn.Text = "Enable Shift Lock: " .. (HubState.ShiftLockToggled and "ON" or "OFF")
+end)
+
 createSectionHeader("Lighting", HubState.OthersPage)
 HubState.LightToggleBtn = createButton("Infinite Yield Light: OFF", HubState.OthersPage, Theme.Surface)
 
@@ -3451,7 +3531,7 @@ local function buildLiquidGlass()
 		Mesh = {
 			Material = Enum.Material.Glass,
 			Color = Color3.fromRGB(0, 0, 0),
-			Transparency = 2.8,
+			Transparency = 3,
 			Anchored = true,
 			CastShadow = false,
 			CanCollide = false,
@@ -3883,9 +3963,9 @@ do
 	if okGlass and type(glassOrErr) == "table" then
 		HubState.LiquidGlass = glassOrErr
 		getgenv().GeminiLiquidGlass = glassOrErr
-		-- Shell + navigation get glass; notification cards are handled in showNotification.
+		-- The main window gets glass; the tab bar gets blur (see the UI Blur loader); notification cards are
+		-- handled in showNotification.
 		HubState.ApplyGlass(MainFrame)
-		-- HubState.ApplyGlass(TabBar)
 	else
 		warn("Gemini Hub Liquid Glass: could not start (" .. tostring(glassOrErr) .. "). The hub works normally without it.")
 	end
@@ -4501,10 +4581,13 @@ do
 
 		-- Any GuiObject in the hub that contains a BlurEffect gets blurred (the module's "objectual" mode).
 		blurOrErr.Watch(ScreenGui)
-        HubState.ApplyBlur(TabBar)
+
+		-- The tab bar uses blur instead of glass (both modules use Glass material, so they cancel each other).
+		HubState.ApplyBlur(TabBar)
+
 		-- Which frames get a blur: the cards on every tab page (toggle rows, buttons, text box, color
 		-- pickers...), meaning direct children of a page that have a visible background and rounded
-		-- corners. MainFrame and TabBar are NOT blurred: they keep the LiquidGlass look.
+		-- corners. MainFrame keeps the LiquidGlass look; the tab bar is blurred separately above.
 		-- Edit this one function to choose different frames.
 		local function isBlurCard(object)
 			return object:IsA("GuiObject")
