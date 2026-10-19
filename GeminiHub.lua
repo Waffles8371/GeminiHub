@@ -1,4 +1,4 @@
--- 💎 GEMINI HUB V14.5 - LIQUID GLASS 3 REDESIGN (XENO PORT) 💎
+-- 💎 GEMINI HUB V14.5 - LIQUID GLASS 6 REDESIGN (XENO PORT) 💎
 -- Xeno-compatible build: executor GUI parent (gethui/CoreGui), getgenv state, executor filesystem persistence,
 -- and the original metatable hooks, combined with the Liquid Glass 3 UI redesign. 'LiquidGlass' tags are kept
 -- on the shell/tab bar/notification cards, and the LiquidGlassHandler module (by @7eoeb / @UNIVERSECORNUCOPIA)
@@ -462,15 +462,34 @@ ScreenGui.Parent = safeParent
 -- ==========================================
 
 local Theme = {
-	-- Smoke-glass shell: neutral graphite, not an opaque black panel.
-	Panel = Color3.fromRGB(31, 37, 46),
-	PanelBottom = Color3.fromRGB(19, 25, 33),
+	-- ==========================================
+	-- 🎛️ LIQUID GLASS 6 KNOBS (the easy-to-edit values)
+	-- ==========================================
+	-- Transparency: higher = clearer. The reference screenshot is about 0.94 for the window.
+	PanelTransparency = 0.90,         -- window fill
+	SurfaceTransparency = 0.84,       -- card fill (a hair darker than the window)
+	StrokeTransparency = 0.88,        -- soft outline on cards and the tab bar
+	NotificationTransparency = 0.55,  -- notification bubbles need more body to stay readable
 
-	-- Content surfaces stay translucent and subdued. These are standard UI
-	-- surfaces; LiquidGlass is reserved for the shell and navigation layer.
-	Surface = Color3.fromRGB(55, 64, 76),
-	SurfaceHover = Color3.fromRGB(75, 87, 101),
-	SurfacePressed = Color3.fromRGB(43, 92, 82),
+	-- Shapes (pixels). Controls are true capsules (radius = half their height).
+	RadiusWindow = 32,                -- main window
+	RadiusPanel = 22,                 -- large panels = window radius minus the 10px page padding
+	RadiusCard = 18,                  -- multi-line frames that would clip text as capsules
+
+	-- Floating minimize circle
+	OrbSize = 58,                     -- same height as the minimized pill
+	OrbGap = 12,                      -- distance from the window
+
+	-- ==========================================
+	-- 🎨 Colors: neutral smoke instead of blue graphite
+	-- ==========================================
+	Panel = Color3.fromRGB(22, 24, 28),
+	PanelBottom = Color3.fromRGB(20, 22, 26),
+
+	-- Cards: a hair darker than the window, so they read as inset wells.
+	Surface = Color3.fromRGB(14, 16, 19),
+	SurfaceHover = Color3.fromRGB(92, 98, 108),
+	SurfacePressed = Color3.fromRGB(62, 68, 78),
 
 	-- iOS-inspired accents: blue for navigation/sliders, green for enabled switches.
 	Accent = Color3.fromRGB(10, 132, 255),
@@ -478,20 +497,21 @@ local Theme = {
 	ToggleOn = Color3.fromRGB(48, 209, 88),
 	Danger = Color3.fromRGB(255, 105, 97),
 
-	-- Clean, pure-white typography with no text strokes.
+	-- Pure white primary text, a touch softer for secondary text.
 	Text = Color3.fromRGB(255, 255, 255),
-	TextSecondary = Color3.fromRGB(255, 255, 255),
+	TextSecondary = Color3.fromRGB(226, 231, 239),
 
 	-- Utility
 	White = Color3.fromRGB(248, 250, 255),
-	Track = Color3.fromRGB(92, 103, 118),
-
-	-- The main surface already has the LiquidGlass module attached; keep its
-	-- transparency level rather than piling on extra opacity or extra effects.
-	PanelTransparency = 0.42,
-	SurfaceTransparency = 0.46,
-	BorderTransparency = 0.56,
+	Track = Color3.fromRGB(120, 127, 138),
 }
+
+-- Derived values: hover and press are always relative to the base fills above.
+Theme.SurfaceHoverTransparency = math.max(0, Theme.SurfaceTransparency - 0.08)
+Theme.SurfacePressedTransparency = math.max(0, Theme.SurfaceTransparency - 0.16)
+Theme.OrbTransparency = Theme.PanelTransparency
+Theme.OrbHoverTransparency = math.max(0, Theme.PanelTransparency - 0.08)
+Theme.OrbPressedTransparency = math.max(0, Theme.PanelTransparency - 0.18)
 
 -- User-exported Figma switch tracks. I/O indicators are already part of these images.
 local ON_SWITCH_IMAGE = "rbxassetid://73774684489893"
@@ -623,7 +643,7 @@ end
 updateResponsiveShell()
 
 local MainCorner = Instance.new("UICorner")
-MainCorner.CornerRadius = UDim.new(0, 26)
+MainCorner.CornerRadius = UDim.new(0, Theme.RadiusWindow)
 MainCorner.Parent = MainFrame
 
 local HubGradient = Instance.new("UIGradient")
@@ -633,16 +653,16 @@ HubGradient.Color = ColorSequence.new({
 	ColorSequenceKeypoint.new(1, Theme.PanelBottom),
 })
 HubGradient.Transparency = NumberSequence.new({
-	NumberSequenceKeypoint.new(0, 0.02),
-	NumberSequenceKeypoint.new(1, 0.10),
+	NumberSequenceKeypoint.new(0, 0),
+	NumberSequenceKeypoint.new(1, 0.04),
 })
 HubGradient.Rotation = 90
 HubGradient.Parent = MainFrame
 
 local MainStroke = Instance.new("UIStroke")
 MainStroke.Color = Theme.White
-MainStroke.Transparency = 0.48
-MainStroke.Thickness = 1.25
+MainStroke.Transparency = 0.55
+MainStroke.Thickness = 1
 MainStroke.Parent = MainFrame
 
 -- ✨ Gradient glass highlight on the border itself. Roblox supports UIGradient
@@ -652,13 +672,13 @@ local MainStrokeGradient = Instance.new("UIGradient")
 MainStrokeGradient.Name = "GlassHighlightGradient"
 MainStrokeGradient.Color = ColorSequence.new({
 	ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
-	ColorSequenceKeypoint.new(0.48, Color3.fromRGB(115, 132, 151)),
+	ColorSequenceKeypoint.new(0.5, Color3.fromRGB(205, 212, 224)),
 	ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 255)),
 })
 MainStrokeGradient.Transparency = NumberSequence.new({
-	NumberSequenceKeypoint.new(0, 0.12),
-	NumberSequenceKeypoint.new(0.48, 0.38),
-	NumberSequenceKeypoint.new(1, 0.12),
+	NumberSequenceKeypoint.new(0, 0.15),
+	NumberSequenceKeypoint.new(0.5, 0.85),
+	NumberSequenceKeypoint.new(1, 0.15),
 })
 MainStrokeGradient.Rotation = 48
 MainStrokeGradient.Parent = MainStroke
@@ -671,8 +691,8 @@ end)
 
 if shadowOk and MainShadow then
 	local configured = pcall(function()
-		MainShadow.Color = Color3.fromRGB(7, 12, 20)
-		MainShadow.Transparency = 0.72
+		MainShadow.Color = Color3.fromRGB(0, 0, 0)
+		MainShadow.Transparency = 0.80
 		MainShadow.BlurRadius = UDim.new(0, 18)
 		MainShadow.Offset = UDim2.new(0, 0, 0, 7)
 		MainShadow.Spread = UDim2.new(0, 3)
@@ -694,7 +714,7 @@ TopShine.Name = "TopShine"
 TopShine.Size = UDim2.new(1, -38, 0, 1)
 TopShine.Position = UDim2.new(0, 19, 0, 2)
 TopShine.BackgroundColor3 = Theme.White
-TopShine.BackgroundTransparency = 0.48
+TopShine.BackgroundTransparency = 0.80
 TopShine.BorderSizePixel = 0
 TopShine.ZIndex = 2
 TopShine.Parent = MainFrame
@@ -803,17 +823,21 @@ Version.TextXAlignment = Enum.TextXAlignment.Left
 Version.Parent = TopBar
 
 local MinMaxBtn = Instance.new("TextButton")
-MinMaxBtn.Size = UDim2.new(0, 30, 0, 30)
-MinMaxBtn.Position = UDim2.new(1, -44, 0, 14)
-MinMaxBtn.BackgroundColor3 = Theme.Surface
-MinMaxBtn.BackgroundTransparency = 0.42
+MinMaxBtn.Name = "MinimizeOrb"
+MinMaxBtn.AnchorPoint = Vector2.new(0.5, 0.5)
+MinMaxBtn.Size = UDim2.fromOffset(Theme.OrbSize, Theme.OrbSize)
+MinMaxBtn.Position = UDim2.new(0.5, 0, 0.5, 0) -- placed next to the window every frame (see below)
+MinMaxBtn.BackgroundColor3 = Theme.Panel
+MinMaxBtn.BackgroundTransparency = Theme.OrbTransparency
 MinMaxBtn.BorderSizePixel = 0
 MinMaxBtn.Text = "−"
 MinMaxBtn.TextColor3 = Theme.Text
 MinMaxBtn.FontFace = ROBOTO_MEDIUM
-MinMaxBtn.TextSize = 15
+MinMaxBtn.TextSize = 32
 MinMaxBtn.AutoButtonColor = false
-MinMaxBtn.Parent = TopBar
+MinMaxBtn.ZIndex = 10
+-- Detached from the window: a child of the ScreenGui, not of the clipped MainFrame.
+MinMaxBtn.Parent = ScreenGui
 
 local MinCorner = Instance.new("UICorner")
 MinCorner.CornerRadius = UDim.new(1, 0)
@@ -821,9 +845,24 @@ MinCorner.Parent = MinMaxBtn
 
 local MinStroke = Instance.new("UIStroke")
 MinStroke.Color = Theme.White
-MinStroke.Transparency = 0.70
+MinStroke.Transparency = 0.55
 MinStroke.Thickness = 1
 MinStroke.Parent = MinMaxBtn
+
+-- Same soft specular rim as the window: bright top-left / bottom-right, almost nothing between.
+local MinStrokeGradient = Instance.new("UIGradient")
+MinStrokeGradient.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+	ColorSequenceKeypoint.new(0.5, Color3.fromRGB(205, 212, 224)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 255)),
+})
+MinStrokeGradient.Transparency = NumberSequence.new({
+	NumberSequenceKeypoint.new(0, 0.15),
+	NumberSequenceKeypoint.new(0.5, 0.85),
+	NumberSequenceKeypoint.new(1, 0.15),
+})
+MinStrokeGradient.Rotation = 48
+MinStrokeGradient.Parent = MinStroke
 
 local minimized = false
 
@@ -834,7 +873,7 @@ MinMaxScale.Parent = MinMaxBtn
 local function pressMinMaxButton()
 	TweenService:Create(MinMaxScale, TweenFast, {Scale = 1.035}):Play()
 	TweenService:Create(MinMaxBtn, TweenFast, {
-		BackgroundTransparency = 0.12,
+		BackgroundTransparency = Theme.OrbPressedTransparency,
 		BackgroundColor3 = Theme.SurfaceHover,
 		TextColor3 = Theme.Text,
 	}):Play()
@@ -843,8 +882,8 @@ end
 local function releaseMinMaxButton()
 	TweenService:Create(MinMaxScale, TweenFast, {Scale = 1}):Play()
 	TweenService:Create(MinMaxBtn, TweenFast, {
-		BackgroundTransparency = 0.42,
-		BackgroundColor3 = Theme.Surface,
+		BackgroundTransparency = Theme.OrbTransparency,
+		BackgroundColor3 = Theme.Panel,
 		TextColor3 = Theme.Text,
 	}):Play()
 end
@@ -904,7 +943,7 @@ MinMaxBtn.MouseEnter:Connect(function()
 		MinMaxBtn,
 		TweenFast,
 		{
-			BackgroundTransparency = 0.24,
+			BackgroundTransparency = Theme.OrbHoverTransparency,
 			TextColor3 = Theme.Text,
 		}
 	):Play()
@@ -915,11 +954,50 @@ MinMaxBtn.MouseLeave:Connect(function()
 		MinMaxBtn,
 		TweenFast,
 		{
-			BackgroundTransparency = 0.42,
+			BackgroundTransparency = Theme.OrbTransparency,
 			TextColor3 = Theme.Text,
 		}
 	):Play()
 end)
+
+-- ⭕ Floating minimize circle: sits next to the window like the search circle in the reference.
+-- It is the same height as the minimized pill, stays glued to the window while it moves, resizes or is
+-- dragged, and flips to the left side (or back inside the header) when the screen has no room on the right.
+local function updateOrbLayout()
+	if not MinMaxBtn.Parent then return end
+
+	local half = Theme.OrbSize / 2
+	local framePos = MainFrame.Position -- center-anchored, same coordinate space as the circle
+	local frameSize = MainFrame.AbsoluteSize
+	local frameAbsX = MainFrame.AbsolutePosition.X
+	local screenWidth = ScreenGui.AbsoluteSize.X
+
+	local offsetX
+	if frameAbsX + frameSize.X + Theme.OrbGap + Theme.OrbSize <= screenWidth then
+		offsetX = frameSize.X / 2 + Theme.OrbGap + half -- right of the window
+	elseif frameAbsX - Theme.OrbGap - Theme.OrbSize >= 0 then
+		offsetX = -(frameSize.X / 2 + Theme.OrbGap + half) -- no room on the right: left of the window
+	else
+		offsetX = frameSize.X / 2 - 8 - half -- no room at all: back inside the header
+	end
+	local offsetY = -frameSize.Y / 2 + 29 -- vertically centered on the 58px header / minimized pill
+
+	MinMaxBtn.Position = UDim2.new(
+		framePos.X.Scale, framePos.X.Offset + offsetX,
+		framePos.Y.Scale, framePos.Y.Offset + offsetY
+	)
+	MinMaxBtn.Visible = MainFrame.Visible
+end
+
+local orbLayoutConnection
+orbLayoutConnection = RunService.RenderStepped:Connect(function()
+	if not MinMaxBtn.Parent then
+		orbLayoutConnection:Disconnect() -- the hub was re-executed and this window is gone
+		return
+	end
+	updateOrbLayout()
+end)
+updateOrbLayout()
 
 -- 🖐️ Desktop + mobile dragging. TouchPan is specifically supported by GuiObject
 -- and avoids relying on mouse-only events on phones/tablets.
@@ -1014,8 +1092,8 @@ local function showNotification(titleText, messageText, duration)
 	local card = Instance.new("Frame")
 	card.Name = "Notification"
 	card.Size = UDim2.new(1, 0, 0, 58)
-	card.BackgroundColor3 = Color3.fromRGB(34, 54, 47)
-	card.BackgroundTransparency = 0.18
+	card.BackgroundColor3 = Color3.fromRGB(24, 26, 30)
+	card.BackgroundTransparency = Theme.NotificationTransparency
 	card.BorderSizePixel = 0
 	card.ClipsDescendants = true
 	card.ZIndex = 51
@@ -1025,20 +1103,20 @@ local function showNotification(titleText, messageText, duration)
 	HubState.ApplyGlass(card)
 
 	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 15)
+	corner.CornerRadius = UDim.new(0, Theme.RadiusPanel)
 	corner.Parent = card
 
 	local stroke = Instance.new("UIStroke")
-	stroke.Color = Theme.ToggleOn
-	stroke.Transparency = 0.25
+	stroke.Color = Theme.White
+	stroke.Transparency = 0.78
 	stroke.Thickness = 1
 	stroke.Parent = card
 
 	local gradient = Instance.new("UIGradient")
 	gradient.Color = ColorSequence.new({
-		ColorSequenceKeypoint.new(0, Color3.fromRGB(43, 67, 57)),
-		ColorSequenceKeypoint.new(0.62, Color3.fromRGB(32, 54, 47)),
-		ColorSequenceKeypoint.new(1, Color3.fromRGB(22, 40, 35)),
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(40, 43, 48)),
+		ColorSequenceKeypoint.new(0.62, Color3.fromRGB(28, 30, 35)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(20, 22, 26)),
 	})
 	gradient.Transparency = NumberSequence.new({
 		NumberSequenceKeypoint.new(0, 0.05),
@@ -1049,8 +1127,8 @@ local function showNotification(titleText, messageText, duration)
 	gradient.Parent = card
 
 	local accent = Instance.new("Frame")
-	accent.Size = UDim2.new(0, 4, 1, -16)
-	accent.Position = UDim2.new(0, 7, 0, 8)
+	accent.Size = UDim2.new(0, 4, 1, -28)
+	accent.Position = UDim2.new(0, 10, 0, 14)
 	accent.BackgroundColor3 = Theme.ToggleOn
 	accent.BorderSizePixel = 0
 	accent.ZIndex = 52
@@ -1088,8 +1166,8 @@ local function showNotification(titleText, messageText, duration)
 	title.TextTransparency = 1
 	message.TextTransparency = 1
 
-	TweenService:Create(card, TweenSoft, {BackgroundTransparency = 0.18}):Play()
-	TweenService:Create(stroke, TweenSoft, {Transparency = 0.25}):Play()
+	TweenService:Create(card, TweenSoft, {BackgroundTransparency = Theme.NotificationTransparency}):Play()
+	TweenService:Create(stroke, TweenSoft, {Transparency = 0.78}):Play()
 	TweenService:Create(accent, TweenSoft, {BackgroundTransparency = 0}):Play()
 	TweenService:Create(title, TweenSoft, {TextTransparency = 0}):Play()
 	TweenService:Create(message, TweenSoft, {TextTransparency = 0}):Play()
@@ -1117,18 +1195,18 @@ TabBar.Name = "TabBar"
 TabBar.Size = UDim2.new(1, -20, 0, 40)
 TabBar.Position = UDim2.new(0, 10, 0, 64)
 TabBar.BackgroundColor3 = Theme.Surface
-TabBar.BackgroundTransparency = 0.52
+TabBar.BackgroundTransparency = Theme.SurfaceTransparency
 TabBar.BorderSizePixel = 0
 TabBar.ZIndex = 5
 TabBar.Parent = MainFrame
 
 local TabCorner = Instance.new("UICorner")
-TabCorner.CornerRadius = UDim.new(0, 14)
+TabCorner.CornerRadius = UDim.new(0.5, 0)
 TabCorner.Parent = TabBar
 
 local TabStroke = Instance.new("UIStroke")
 TabStroke.Color = Theme.White
-TabStroke.Transparency = 0.76
+TabStroke.Transparency = Theme.StrokeTransparency
 TabStroke.Thickness = 1
 TabStroke.Parent = TabBar
 
@@ -1171,7 +1249,7 @@ TabIndicator.ZIndex = 6
 TabIndicator.Parent = TabIndicatorLayer
 
 local TabIndicatorCorner = Instance.new("UICorner")
-TabIndicatorCorner.CornerRadius = UDim.new(0, 11)
+TabIndicatorCorner.CornerRadius = UDim.new(0.5, 0)
 TabIndicatorCorner.Parent = TabIndicator
 
 local TabIndicatorStroke = Instance.new("UIStroke")
@@ -1295,7 +1373,7 @@ local function createTab(name, _pastelBaseColor)
 	btn.Parent = TabBar
 
 	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 10)
+	corner.CornerRadius = UDim.new(0.5, 0)
 	corner.Parent = btn
 
 	local btnStroke = Instance.new("UIStroke")
@@ -1439,7 +1517,7 @@ local function createButton(text, parent, _pastelColor)
 	local btn = Instance.new("TextButton")
 	btn.Size = UDim2.new(1, 0, 0, 42)
 	btn.BackgroundColor3 = Theme.Surface
-	btn.BackgroundTransparency = 0.43
+	btn.BackgroundTransparency = Theme.SurfaceTransparency
 	btn.BorderSizePixel = 0
 	btn.Text = text
 	btn.TextColor3 = Theme.Text
@@ -1450,7 +1528,7 @@ local function createButton(text, parent, _pastelColor)
 	btn.Parent = parent
 
 	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 15)
+	corner.CornerRadius = UDim.new(0.5, 0)
 	corner.Parent = btn
 
 	local buttonScale = Instance.new("UIScale")
@@ -1465,7 +1543,7 @@ local function createButton(text, parent, _pastelColor)
 
 	local stroke = Instance.new("UIStroke")
 	stroke.Color = Theme.White
-	stroke.Transparency = 0.76
+	stroke.Transparency = Theme.StrokeTransparency
 	stroke.Thickness = 1
 	stroke.Parent = btn
 
@@ -1617,7 +1695,7 @@ local function createButton(text, parent, _pastelColor)
 			btn,
 			TweenFast,
 			{
-				BackgroundTransparency = 0.27,
+				BackgroundTransparency = Theme.SurfaceHoverTransparency,
 				BackgroundColor3 = Theme.SurfaceHover,
 			}
 		):Play()
@@ -1628,7 +1706,7 @@ local function createButton(text, parent, _pastelColor)
 			btn,
 			TweenFast,
 			{
-				BackgroundTransparency = 0.43,
+				BackgroundTransparency = Theme.SurfaceTransparency,
 				BackgroundColor3 = Theme.Surface,
 			}
 		):Play()
@@ -1640,7 +1718,7 @@ local function createButton(text, parent, _pastelColor)
 		playUISound(ButtonSFX)
 		hapticPulse(btn, buttonScale, 1.0)
 		TweenService:Create(btn, TweenFast, {
-			BackgroundTransparency = 0.20,
+			BackgroundTransparency = Theme.SurfacePressedTransparency,
 			BackgroundColor3 = Theme.SurfacePressed,
 		}):Play()
 		TweenService:Create(buttonScale, TweenFast, {Scale = 0.97}):Play()
@@ -1649,7 +1727,7 @@ local function createButton(text, parent, _pastelColor)
 	local function releaseButton()
 		if status.Visible then return end
 		TweenService:Create(btn, TweenFast, {
-			BackgroundTransparency = 0.27,
+			BackgroundTransparency = Theme.SurfaceHoverTransparency,
 			BackgroundColor3 = Theme.SurfaceHover,
 		}):Play()
 		TweenService:Create(buttonScale, TweenFast, {Scale = 1}):Play()
@@ -1840,12 +1918,12 @@ local function create2DColorPicker(titleText, defaultColor, parent, callback)
 	local container = Instance.new("Frame")
 	container.Size = UDim2.new(1, 0, 0, 114)
 	container.BackgroundColor3 = Theme.Surface
-	container.BackgroundTransparency = 0.54
+	container.BackgroundTransparency = Theme.SurfaceTransparency
 	container.BorderSizePixel = 0
 	container.Parent = parent
 
 	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 16)
+	corner.CornerRadius = UDim.new(0, Theme.RadiusPanel)
 	corner.Parent = container
 
 	local border = Instance.new("UIStroke")
@@ -2046,7 +2124,7 @@ createSectionHeader("Watched Players", HubState.WarningPage)
 HubState.WarningNameBox = Instance.new("TextBox")
 HubState.WarningNameBox.Size = UDim2.new(1, 0, 0, 36)
 HubState.WarningNameBox.BackgroundColor3 = Theme.Surface
-HubState.WarningNameBox.BackgroundTransparency = 0.42
+HubState.WarningNameBox.BackgroundTransparency = Theme.SurfaceTransparency
 HubState.WarningNameBox.PlaceholderText = "Enter Roblox username..."
 HubState.WarningNameBox.PlaceholderColor3 = Theme.TextSecondary
 HubState.WarningNameBox.Text = ""
@@ -2055,14 +2133,14 @@ HubState.WarningNameBox.FontFace = ROBOTO_REGULAR
 HubState.WarningNameBox.TextSize = 11
 HubState.WarningNameBox.ClearTextOnFocus = false
 HubState.WarningNameBox.Parent = HubState.WarningPage
-Instance.new("UICorner", HubState.WarningNameBox).CornerRadius = UDim.new(0, 10)
+Instance.new("UICorner", HubState.WarningNameBox).CornerRadius = UDim.new(0.5, 0)
 HubState.warningBoxPadding = Instance.new("UIPadding")
 HubState.warningBoxPadding.PaddingLeft = UDim.new(0, 12)
 HubState.warningBoxPadding.PaddingRight = UDim.new(0, 12)
 HubState.warningBoxPadding.Parent = HubState.WarningNameBox
 HubState.warningBoxStroke = Instance.new("UIStroke")
 HubState.warningBoxStroke.Color = Theme.White
-HubState.warningBoxStroke.Transparency = 0.50
+HubState.warningBoxStroke.Transparency = Theme.StrokeTransparency
 HubState.warningBoxStroke.Thickness = 1
 HubState.warningBoxStroke.Parent = HubState.WarningNameBox
 
@@ -2104,11 +2182,11 @@ local function refreshWarningList()
 			row.Name = "WarningRow"
 			row.Size = UDim2.new(1, -4, 0, 30)
 			row.BackgroundColor3 = Theme.Surface
-			row.BackgroundTransparency = 0.38
+			row.BackgroundTransparency = Theme.SurfaceTransparency
 			row.BorderSizePixel = 0
 			row.LayoutOrder = index
 			row.Parent = HubState.WarningListFrame
-			Instance.new("UICorner", row).CornerRadius = UDim.new(0, 9)
+			Instance.new("UICorner", row).CornerRadius = UDim.new(0.5, 0)
 			local dot = Instance.new("Frame")
 			dot.Size = UDim2.fromOffset(7,7)
 			dot.Position = UDim2.new(0,9,0.5,-3.5)
@@ -2605,17 +2683,17 @@ end)
 HubState.WaypointNameBox = Instance.new("TextBox", HubState.WaypointPage)
 HubState.WaypointNameBox.Size = UDim2.new(1, 0, 0, 36)
 HubState.WaypointNameBox.BackgroundColor3 = Theme.Surface
-HubState.WaypointNameBox.BackgroundTransparency = 0.42
+HubState.WaypointNameBox.BackgroundTransparency = Theme.SurfaceTransparency
 HubState.WaypointNameBox.PlaceholderText = "Enter Waypoint Name..."
 HubState.WaypointNameBox.PlaceholderColor3 = Theme.TextSecondary
 HubState.WaypointNameBox.Text = ""
 HubState.WaypointNameBox.TextColor3 = Theme.Text
 HubState.WaypointNameBox.FontFace = ROBOTO_REGULAR
 HubState.WaypointNameBox.TextSize = 11
-Instance.new("UICorner", HubState.WaypointNameBox).CornerRadius = UDim.new(0, 10)
+Instance.new("UICorner", HubState.WaypointNameBox).CornerRadius = UDim.new(0.5, 0)
 HubState.wpBoxStroke = Instance.new("UIStroke", HubState.WaypointNameBox)
 HubState.wpBoxStroke.Color = Theme.White
-HubState.wpBoxStroke.Transparency = 0.50
+HubState.wpBoxStroke.Transparency = Theme.StrokeTransparency
 HubState.wpBoxStroke.Thickness = 1
 
 HubState.CreateWaypointBtn = createButton("Create Waypoint Here", HubState.WaypointPage, Color3.fromRGB(210, 235, 255))
@@ -2638,8 +2716,8 @@ local function refreshWaypointList()
 		local row = Instance.new("Frame", HubState.WaypointListFrame)
 		row.Size = UDim2.new(1, 0, 0, 32)
 		row.BackgroundColor3 = Theme.Surface
-		row.BackgroundTransparency = 0.38
-		Instance.new("UICorner", row).CornerRadius = UDim.new(0, 8)
+		row.BackgroundTransparency = Theme.SurfaceTransparency
+		Instance.new("UICorner", row).CornerRadius = UDim.new(0.5, 0)
 		
 		local rowIcon = Instance.new("ImageLabel", row)
 		rowIcon.Size = UDim2.new(0, 16, 0, 16)
@@ -2667,7 +2745,7 @@ local function refreshWaypointList()
 		tpBtn.TextColor3 = Theme.White
 		tpBtn.FontFace = ROBOTO_BOLD
 		tpBtn.TextSize = 10
-		Instance.new("UICorner", tpBtn).CornerRadius = UDim.new(0, 6)
+		Instance.new("UICorner", tpBtn).CornerRadius = UDim.new(0.5, 0)
 		
 		tpBtn.MouseButton1Click:Connect(function()
 			local char = LocalPlayer.Character
@@ -2686,7 +2764,7 @@ local function refreshWaypointList()
 		delBtn.TextColor3 = Theme.Text
 		delBtn.FontFace = ROBOTO_BOLD
 		delBtn.TextSize = 10
-		Instance.new("UICorner", delBtn).CornerRadius = UDim.new(0, 6)
+		Instance.new("UICorner", delBtn).CornerRadius = UDim.new(0.5, 0)
 		
 		delBtn.MouseButton1Click:Connect(function()
 			if wpData.Part then wpData.Part:Destroy() end
@@ -2791,13 +2869,13 @@ createSectionHeader("View Baseline", HubState.SpeedPage)
 HubState.ViewBaselineFrame = Instance.new("Frame", HubState.SpeedPage)
 HubState.ViewBaselineFrame.Size = UDim2.new(1, 0, 0, 70)
 HubState.ViewBaselineFrame.BackgroundColor3 = Theme.Surface
-HubState.ViewBaselineFrame.BackgroundTransparency = 0.42
+HubState.ViewBaselineFrame.BackgroundTransparency = Theme.SurfaceTransparency
 HubState.ViewBaselineFrame.BorderSizePixel = 0
 HubState.viewBaseCorner = Instance.new("UICorner", HubState.ViewBaselineFrame)
-HubState.viewBaseCorner.CornerRadius = UDim.new(0, 11)
+HubState.viewBaseCorner.CornerRadius = UDim.new(0, Theme.RadiusCard)
 HubState.viewBaseStroke = Instance.new("UIStroke", HubState.ViewBaselineFrame)
 HubState.viewBaseStroke.Color = Theme.White
-HubState.viewBaseStroke.Transparency = 0.6
+HubState.viewBaseStroke.Transparency = Theme.StrokeTransparency
 
 HubState.ViewBaselineInfo = Instance.new("TextLabel", HubState.ViewBaselineFrame)
 HubState.ViewBaselineInfo.Size = UDim2.new(0.56, -8, 0, 38)
@@ -2814,14 +2892,14 @@ HubState.ViewBaselineBox = Instance.new("TextBox", HubState.ViewBaselineFrame)
 HubState.ViewBaselineBox.Size = UDim2.new(0.28, 0, 0, 30)
 HubState.ViewBaselineBox.Position = UDim2.new(0.59, 0, 0, 8)
 HubState.ViewBaselineBox.BackgroundColor3 = Theme.Surface
-HubState.ViewBaselineBox.BackgroundTransparency = 0.42
+HubState.ViewBaselineBox.BackgroundTransparency = Theme.SurfaceTransparency
 HubState.ViewBaselineBox.Text = tostring(HubState.ViewBaselineSpeed)
 HubState.ViewBaselineBox.PlaceholderText = "Speed"
 HubState.ViewBaselineBox.TextColor3 = Theme.Text
 HubState.ViewBaselineBox.FontFace = ROBOTO_BOLD
 HubState.ViewBaselineBox.TextSize = 12
 HubState.ViewBaselineBox.ClearTextOnFocus = false
-Instance.new("UICorner", HubState.ViewBaselineBox).CornerRadius = UDim.new(0, 8)
+Instance.new("UICorner", HubState.ViewBaselineBox).CornerRadius = UDim.new(0.5, 0)
 
 HubState.ApplyViewBaselineBtn = createButton("Apply", HubState.ViewBaselineFrame, Theme.Surface)
 HubState.ApplyViewBaselineBtn.Size = UDim2.new(0.12, 0, 0, 30)
@@ -2833,13 +2911,13 @@ if HubState.ApplyViewBaselineStatus then HubState.ApplyViewBaselineStatus.Visibl
 HubState.DisplayFrame = Instance.new("Frame", HubState.SpeedPage)
 HubState.DisplayFrame.Size = UDim2.new(1, 0, 0, 110)
 HubState.DisplayFrame.BackgroundColor3 = Theme.Surface
-HubState.DisplayFrame.BackgroundTransparency = 0.42
+HubState.DisplayFrame.BackgroundTransparency = Theme.SurfaceTransparency
 HubState.DisplayFrame.BorderSizePixel = 0
 HubState.displayCorner = Instance.new("UICorner", HubState.DisplayFrame)
-HubState.displayCorner.CornerRadius = UDim.new(0, 13)
+HubState.displayCorner.CornerRadius = UDim.new(0, Theme.RadiusCard)
 HubState.dispStroke = Instance.new("UIStroke", HubState.DisplayFrame)
 HubState.dispStroke.Color = Theme.White
-HubState.dispStroke.Transparency = 0.58
+HubState.dispStroke.Transparency = Theme.StrokeTransparency
 HubState.dispStroke.Thickness = 1
 
 HubState.ActualSpeedLabel = Instance.new("TextLabel", HubState.DisplayFrame)
@@ -2910,12 +2988,12 @@ HubState.AddedBox = Instance.new("TextBox", HubState.AddedSpeedContainer)
 HubState.AddedBox.Size = UDim2.new(0.38, 0, 1, 0)
 HubState.AddedBox.Position = UDim2.new(0.62, 0, 0, 0)
 HubState.AddedBox.BackgroundColor3 = Theme.Surface
-HubState.AddedBox.BackgroundTransparency = 0.42
+HubState.AddedBox.BackgroundTransparency = Theme.SurfaceTransparency
 HubState.AddedBox.Text = tostring(HubState.AddedSpeed)
 HubState.AddedBox.TextColor3 = Theme.Text
 HubState.AddedBox.FontFace = ROBOTO_BOLD
 HubState.AddedBox.TextSize = 12
-Instance.new("UICorner", HubState.AddedBox).CornerRadius = UDim.new(0, 11)
+Instance.new("UICorner", HubState.AddedBox).CornerRadius = UDim.new(0.5, 0)
 
 HubState.CapContainer = Instance.new("Frame", HubState.SpeedPage)
 HubState.CapContainer.Size = UDim2.new(1, 0, 0, 36)
@@ -2934,12 +3012,12 @@ HubState.CapBox = Instance.new("TextBox", HubState.CapContainer)
 HubState.CapBox.Size = UDim2.new(0.38, 0, 1, 0)
 HubState.CapBox.Position = UDim2.new(0.62, 0, 0, 0)
 HubState.CapBox.BackgroundColor3 = Theme.Surface
-HubState.CapBox.BackgroundTransparency = 0.42
+HubState.CapBox.BackgroundTransparency = Theme.SurfaceTransparency
 HubState.CapBox.Text = tostring(HubState.SpeedCap)
 HubState.CapBox.TextColor3 = Theme.Text
 HubState.CapBox.FontFace = ROBOTO_BOLD
 HubState.CapBox.TextSize = 12
-Instance.new("UICorner", HubState.CapBox).CornerRadius = UDim.new(0, 11)
+Instance.new("UICorner", HubState.CapBox).CornerRadius = UDim.new(0.5, 0)
 
 HubState.ApplySpeedBtn = createButton("Apply Speed Modifications", HubState.SpeedPage, Color3.fromRGB(210, 235, 255))
 HubState.ApplySpeedStatus = HubState.ApplySpeedBtn:FindFirstChild("StatusPill")
@@ -3327,13 +3405,13 @@ HubState.KeybindBtn = Instance.new("TextButton", HubState.KeybindContainer)
 HubState.KeybindBtn.Size = UDim2.new(0.38, 0, 1, 0)
 HubState.KeybindBtn.Position = UDim2.new(0.62, 0, 0, 0)
 HubState.KeybindBtn.BackgroundColor3 = Theme.Surface
-HubState.KeybindBtn.BackgroundTransparency = 0.40
+HubState.KeybindBtn.BackgroundTransparency = Theme.SurfaceTransparency
 HubState.KeybindBtn.BorderSizePixel = 0
 HubState.KeybindBtn.Text = HubState.ToggleKeybind.Name
 HubState.KeybindBtn.TextColor3 = Theme.Text
 HubState.KeybindBtn.FontFace = ROBOTO_BOLD
 HubState.KeybindBtn.TextSize = 11
-Instance.new("UICorner", HubState.KeybindBtn).CornerRadius = UDim.new(0, 11)
+Instance.new("UICorner", HubState.KeybindBtn).CornerRadius = UDim.new(0.5, 0)
 
 HubState.KeybindBtn.MouseButton1Click:Connect(function()
 	HubState.IsRebinding = true
@@ -3388,14 +3466,14 @@ HubState.OpenMenuBtn = Instance.new("TextButton", HubState.OpenMenuContainer)
 HubState.OpenMenuBtn.Size = UDim2.new(0.38, 0, 1, 0)
 HubState.OpenMenuBtn.Position = UDim2.new(0.62, 0, 0, 0)
 HubState.OpenMenuBtn.BackgroundColor3 = Theme.Surface
-HubState.OpenMenuBtn.BackgroundTransparency = 0.40
+HubState.OpenMenuBtn.BackgroundTransparency = Theme.SurfaceTransparency
 HubState.OpenMenuBtn.BorderSizePixel = 0
 HubState.OpenMenuBtn.Text = HubState.OpenMenuKeybind.Name
 HubState.OpenMenuBtn.TextColor3 = Theme.Text
 HubState.OpenMenuBtn.FontFace = ROBOTO_BOLD
 HubState.OpenMenuBtn.TextSize = 11
 HubState.OpenMenuBtn.AutoButtonColor = false
-Instance.new("UICorner", HubState.OpenMenuBtn).CornerRadius = UDim.new(0, 11)
+Instance.new("UICorner", HubState.OpenMenuBtn).CornerRadius = UDim.new(0.5, 0)
 
 HubState.OpenMenuBtn.MouseButton1Click:Connect(function()
 	HubState.IsRebindingOpenMenu = true
@@ -3425,7 +3503,7 @@ end)
 HubState.StatusLabel = Instance.new("TextLabel")
 HubState.StatusLabel.Size = UDim2.new(1, 0, 0, 64)
 HubState.StatusLabel.BackgroundColor3 = Theme.Surface
-HubState.StatusLabel.BackgroundTransparency = 0.40
+HubState.StatusLabel.BackgroundTransparency = Theme.SurfaceTransparency
 HubState.StatusLabel.BorderSizePixel = 0
 HubState.StatusLabel.TextColor3 = Theme.Text
 HubState.StatusLabel.FontFace = ROBOTO_MEDIUM
@@ -3435,7 +3513,7 @@ HubState.StatusLabel.TextYAlignment = Enum.TextYAlignment.Center
 HubState.StatusLabel.TextWrapped = true
 HubState.StatusLabel.Text = ""
 HubState.StatusLabel.Parent = HubState.SettingsPage
-Instance.new("UICorner", HubState.StatusLabel).CornerRadius = UDim.new(0, 10)
+Instance.new("UICorner", HubState.StatusLabel).CornerRadius = UDim.new(0.5, 0)
 HubState.statusPad = Instance.new("UIPadding")
 HubState.statusPad.PaddingLeft = UDim.new(0, 12)
 HubState.statusPad.PaddingRight = UDim.new(0, 12)
@@ -3966,6 +4044,7 @@ do
 		-- The main window gets glass; the tab bar gets blur (see the UI Blur loader); notification cards are
 		-- handled in showNotification.
 		HubState.ApplyGlass(MainFrame)
+		HubState.ApplyGlass(MinMaxBtn) -- the floating minimize circle gets the same glass as the window
 	else
 		warn("Gemini Hub Liquid Glass: could not start (" .. tostring(glassOrErr) .. "). The hub works normally without it.")
 	end
