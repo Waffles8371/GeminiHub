@@ -3618,7 +3618,7 @@ local function buildLiquidGlass()
 			AudioCanCollide = false
 		},
 		Tag = "LiquidGlass",
-		Padding = 0.005,
+		Padding = 0.01,
 		-- [XENO PORT] Nudge (in pixels) added to every glass position. If the glass sits a few
 		-- pixels off from your UI, tweak this, e.g. Vector2.new(0, -58) or Vector2.new(0, 58).
 		ExtraOffset = Vector2.new(0, 0),
