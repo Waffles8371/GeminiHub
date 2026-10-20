@@ -479,6 +479,12 @@ local Theme = {
 	-- Floating minimize circle
 	OrbSize = 58,                     -- same height as the minimized pill
 	OrbGap = 12,                      -- distance from the window
+	OrbPlusImage = "rbxassetid://13492314463",   -- "+" symbol (shown while the window is minimized)
+	OrbMinusImage = "rbxassetid://15396334032",  -- "-" symbol (shown while the window is open)
+	OrbPlusScale = 0.80,              -- "+" image size as a fraction of the circle
+	OrbMinusScale = 0.68,             -- the "-" is a bit smaller than the "+"
+	OrbRimThickness = 1.5,            -- grey rim around the circle
+	OrbRimTransparency = 0.30,        -- lower = stronger rim
 
 	-- ==========================================
 	-- 🎨 Colors: neutral smoke instead of blue graphite
@@ -708,21 +714,6 @@ else
 	warn("Gemini Hub: UIShadow is unavailable in this Roblox environment; continuing without the UI shadow.")
 end
 
--- Very subtle top-edge shine to sell the glass material.
-local TopShine = Instance.new("Frame")
-TopShine.Name = "TopShine"
-TopShine.Size = UDim2.new(1, -38, 0, 1)
-TopShine.Position = UDim2.new(0, 19, 0, 2)
-TopShine.BackgroundColor3 = Theme.White
-TopShine.BackgroundTransparency = 0.80
-TopShine.BorderSizePixel = 0
-TopShine.ZIndex = 2
-TopShine.Parent = MainFrame
-
-local TopShineCorner = Instance.new("UICorner")
-TopShineCorner.CornerRadius = UDim.new(1, 0)
-TopShineCorner.Parent = TopShine
-
 -- ==========================================
 -- 🫧 CLIENT VISUAL BLUR
 -- ==========================================
@@ -830,7 +821,7 @@ MinMaxBtn.Position = UDim2.new(0.5, 0, 0.5, 0) -- placed next to the window ever
 MinMaxBtn.BackgroundColor3 = Theme.Panel
 MinMaxBtn.BackgroundTransparency = Theme.OrbTransparency
 MinMaxBtn.BorderSizePixel = 0
-MinMaxBtn.Text = "−"
+MinMaxBtn.Text = ""
 MinMaxBtn.TextColor3 = Theme.Text
 MinMaxBtn.FontFace = ROBOTO_MEDIUM
 MinMaxBtn.TextSize = 32
@@ -845,24 +836,57 @@ MinCorner.Parent = MinMaxBtn
 
 local MinStroke = Instance.new("UIStroke")
 MinStroke.Color = Theme.White
-MinStroke.Transparency = 0.55
-MinStroke.Thickness = 1
+MinStroke.Transparency = Theme.OrbRimTransparency
+MinStroke.Thickness = Theme.OrbRimThickness
 MinStroke.Parent = MinMaxBtn
 
--- Same soft specular rim as the window: bright top-left / bottom-right, almost nothing between.
+-- Grey rim like the reference circle: darkest along the top edge, lighter toward the bottom, which
+-- gives the circle some thickness (depth) instead of a bright white outline.
 local MinStrokeGradient = Instance.new("UIGradient")
 MinStrokeGradient.Color = ColorSequence.new({
-	ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
-	ColorSequenceKeypoint.new(0.5, Color3.fromRGB(205, 212, 224)),
-	ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 255)),
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(58, 63, 71)),
+	ColorSequenceKeypoint.new(0.5, Color3.fromRGB(92, 98, 107)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(128, 134, 143)),
 })
 MinStrokeGradient.Transparency = NumberSequence.new({
-	NumberSequenceKeypoint.new(0, 0.15),
-	NumberSequenceKeypoint.new(0.5, 0.85),
-	NumberSequenceKeypoint.new(1, 0.15),
+	NumberSequenceKeypoint.new(0, 0),
+	NumberSequenceKeypoint.new(0.5, 0.15),
+	NumberSequenceKeypoint.new(1, 0.25),
 })
-MinStrokeGradient.Rotation = 48
+MinStrokeGradient.Rotation = 90
 MinStrokeGradient.Parent = MinStroke
+
+-- "+" / "-" symbols are rounded PNG icons instead of text. If an image has not loaded after 4 seconds
+-- (asset unavailable), the old text symbols are shown instead.
+local OrbIcon = Instance.new("ImageLabel")
+OrbIcon.Name = "Icon"
+OrbIcon.AnchorPoint = Vector2.new(0.5, 0.5)
+OrbIcon.Position = UDim2.fromScale(0.5, 0.5)
+OrbIcon.BackgroundTransparency = 1
+OrbIcon.ImageColor3 = Theme.Text
+OrbIcon.ScaleType = Enum.ScaleType.Fit
+OrbIcon.ZIndex = 11
+OrbIcon.Parent = MinMaxBtn
+
+local orbIsMinimized = false
+local orbIconFailed = false
+
+local function setOrbSymbol(isMinimized)
+	orbIsMinimized = isMinimized
+	local scale = isMinimized and Theme.OrbPlusScale or Theme.OrbMinusScale
+	OrbIcon.Image = isMinimized and Theme.OrbPlusImage or Theme.OrbMinusImage
+	OrbIcon.Size = UDim2.fromScale(scale, scale)
+	OrbIcon.Visible = not orbIconFailed
+	MinMaxBtn.Text = orbIconFailed and (isMinimized and "+" or "−") or ""
+end
+setOrbSymbol(false) -- the window starts open, so the circle shows "-"
+
+task.delay(4, function()
+	if MinMaxBtn.Parent and not OrbIcon.IsLoaded then
+		orbIconFailed = true
+		setOrbSymbol(orbIsMinimized)
+	end
+end)
 
 local minimized = false
 
@@ -902,7 +926,7 @@ MinMaxBtn.MouseButton1Click:Connect(function()
 	local currentSize = MainFrame.AbsoluteSize
 	local currentPos = MainFrame.Position
 	minimized = not minimized
-	MinMaxBtn.Text = minimized and "+" or "−"
+	setOrbSymbol(minimized)
 
 	local targetSize
 	if minimized then
@@ -3618,7 +3642,7 @@ local function buildLiquidGlass()
 			AudioCanCollide = false
 		},
 		Tag = "LiquidGlass",
-		Padding = 0.01,
+		Padding = 0.001,
 		-- [XENO PORT] Nudge (in pixels) added to every glass position. If the glass sits a few
 		-- pixels off from your UI, tweak this, e.g. Vector2.new(0, -58) or Vector2.new(0, 58).
 		ExtraOffset = Vector2.new(0, 0),
@@ -4080,8 +4104,9 @@ local UIBlurSettings = {
 	DefaultInverted = false,    -- true = inverts the colours behind the frame (best on square frames)
 	StrokeSize = 0,             -- grows the blur beyond the frame edge; 1 = same size as the frame
 
-	-- The author's blur only works at Roblox graphics quality 8 or higher (Esc > Settings > Graphics).
-	RequireQuality = true,
+	-- The author's blur switches itself off below graphics quality 8. Turned OFF here, so the blur is never
+	-- disabled by a quality check (the engine can still reduce its own quality on Automatic graphics).
+	RequireQuality = false,
 	MinQualityLevel = 8,
 	-- "Automatic" graphics counts as quality 0, which the original would reject. true = allow it.
 	AllowAutomaticQuality = true,
@@ -4422,10 +4447,10 @@ local function buildUIBlur()
 			end
 		end))
 		table.insert(self._Connections, renderEvent:Connect(function()
-			-- [XENO PORT] a failing update disables only this blur instead of erroring every frame
+			-- [XENO PORT] an update that errors is skipped for that frame (warned once) and retried on the next
+			-- one, so a hiccup never switches the blur off
 			local ok, err = pcall(self._Update, self)
 			if not ok then
-				self._IsRendering = false
 				warnOnce(err)
 			end
 		end))
